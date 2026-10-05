@@ -86,7 +86,9 @@ class GeminiFreeTier:
         except urllib.error.HTTPError as error:
             # Never expose upstream messages, headers or the key-bearing request.
             code = {400:'request_rejected',401:'authentication_failed',403:'access_denied',
-                    404:'model_unavailable',429:'quota_exceeded'}.get(error.code, 'provider_http_error')
+                    404:'model_unavailable',429:'quota_exceeded',500:'provider_unavailable',
+                    502:'provider_unavailable',503:'provider_unavailable',504:'provider_unavailable'}.get(
+                        error.code, 'provider_http_error')
             raise FeedbackError(code) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise FeedbackError('network_or_timeout') from None

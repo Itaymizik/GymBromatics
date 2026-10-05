@@ -170,7 +170,8 @@ def test_provider_request_and_response(monkeypatch):
     assert 'tools' not in body and len(captured) == 1 and timeout == 90
 
 
-@pytest.mark.parametrize('status,code', [(429,'quota_exceeded'),(403,'access_denied'),(404,'model_unavailable'),(500,'provider_http_error')])
+@pytest.mark.parametrize('status,code', [(429,'quota_exceeded'),(403,'access_denied'),(404,'model_unavailable'),
+                                         (500,'provider_unavailable'),(503,'provider_unavailable')])
 def test_provider_errors_are_redacted_without_retry(monkeypatch,status,code):
     calls = []
     def fail(request,timeout):

@@ -60,6 +60,8 @@ def _fact_numbers(fact: dict[str, Any]) -> list[float]:
 
 def _numbers_are_grounded(text: str, refs: list[str], facts: dict[str, Any]) -> bool:
     allowed = [number for ref in refs for number in _fact_numbers(facts[ref])]
+    allowed.extend(float(match.group(1)) for ref in refs
+                   if (match := re.match(r'^r(\d+)(?:\.|$)', ref)))
     for token in NUMBER_PATTERN.findall(text):
         raw = token.rstrip('%').replace(',', '.')
         try:

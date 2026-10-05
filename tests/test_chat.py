@@ -73,6 +73,14 @@ def test_numeric_claim_must_match_cited_evidence(data,caplog):
     assert 'reason=ungrounded_number' in caplog.text
 
 
+def test_cited_repetition_ordinal_is_grounded(data):
+    provider=Provider()
+    provider.content={'paragraphs':[{'text':'בחזרה 1 משך העלייה מופיע בראיות.',
+        'evidence_ids':['r1.ascent_duration']}]}
+    result=reply(data,'איזו חזרה?',None,None,[],None,provider)
+    assert result['paragraphs'][0]['evidence'][0]['id']=='r1.ascent_duration'
+
+
 @pytest.fixture
 def api():
     provider=Provider()
