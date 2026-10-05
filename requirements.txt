@@ -1,6 +1,6 @@
 mediapipe==1.0.1
 opencv-contrib-python==5.0.0.93
-numpy==2.4.6
+numpy==2.5.3
 scipy==1.17.1
 imageio-ffmpeg==0.6.0
 -r requirements-api.txt
