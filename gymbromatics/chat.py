@@ -1,6 +1,7 @@
 """Session-grounded chat. The server owns history and resolves video evidence."""
 import hashlib
 import json
+import logging
 import math
 import re
 from typing import Any
@@ -17,7 +18,7 @@ Speed is shoulder-midpoint vertical speed in px/s. Depth is the <=90 degree knee
 Clear means no configured rule triggered, review means inspect the video, unavailable means unknown.
 Missing measurements are not zero. A median alone cannot establish consistency or a trend.
 Explain what can and cannot be concluded. Do not prescribe training loads or medical treatment.
-Do not compute new numbers. Write qualitative text without numeric digits; UI shows exact evidence.
+Do not compute new numbers. You may repeat a number only when it appears in a cited evidence fact.
 Return 1-4 paragraphs, each {text,evidence_ids}. Cite actual relevant fact IDs for session claims.
 For explanations use definition.* references; for unknown/off-topic requests cite session.context
 and explain the limit. No HTML or Markdown. Never invent URLs, timestamps, facts or references.
@@ -38,6 +39,38 @@ LABELS = {'duration':'משך חזרה','descent_duration':'משך ירידה','a
     'min_knee_angle':'זווית ברך מינימלית','min_hip_angle':'זווית אגן מינימלית','min_ankle_angle':'זווית קרסול מינימלית',
     'bottom_pause':'שהייה בתחתית','peak_ascent_velocity':'מהירות שיא בעלייה','mean_ascent_velocity':'מהירות ממוצעת בעלייה',
     'depth':'עומק','coordination':'תיאום אגן–כתפיים','heel':'עקב'}
+
+
+LOGGER = logging.getLogger(__name__)
+NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?\d+(?:[.,]\d+)?%?")
+
+
+def _invalid(reason: str) -> None:
+    """Record only a safe reason code; never log prompts, answers or evidence."""
+    LOGGER.warning("chat_response_rejected reason=%s", reason)
+    raise FeedbackError('invalid_chat_response')
+
+
+def _fact_numbers(fact: dict[str, Any]) -> list[float]:
+    """Return numeric measurements that the cited fact explicitly exposes."""
+    keys = ('value', 'delta', 'percent', 'start_seconds', 'bottom_seconds', 'end_seconds')
+    return [float(fact[key]) for key in keys
+            if isinstance(fact.get(key), (int, float)) and math.isfinite(fact[key])]
+
+
+def _numbers_are_grounded(text: str, refs: list[str], facts: dict[str, Any]) -> bool:
+    allowed = [number for ref in refs for number in _fact_numbers(facts[ref])]
+    for token in NUMBER_PATTERN.findall(text):
+        raw = token.rstrip('%').replace(',', '.')
+        try:
+            stated = float(raw)
+        except ValueError:
+            return False
+        decimals = len(raw.partition('.')[2])
+        tolerance = 0.5 * (10 ** -decimals) + 1e-9
+        if not any(abs(stated - number) <= tolerance for number in allowed):
+            return False
+    return True
 
 
 def resolve_evidence(ref: str, facts: dict[str, Any], mapping: dict[str,str], session: dict[str,Any]) -> dict[str,Any]:
@@ -96,17 +129,21 @@ def reply(session: dict[str, Any], message: str, selected_id: str | None, foot_s
     payload={'evidence':evidence,'selected_rep':selected,'history':recent,'question':message.strip()}
     answer=provider.generate(SYSTEM,payload,SCHEMA)['content']
     if not isinstance(answer,dict) or set(answer)!={'paragraphs'} or not isinstance(answer['paragraphs'],list) or not 1<=len(answer['paragraphs'])<=4:
-        raise FeedbackError('invalid_chat_response')
+        _invalid('invalid_envelope')
     paragraphs=[]
     for item in answer['paragraphs']:
         if not isinstance(item,dict) or set(item)!={'text','evidence_ids'}:
-            raise FeedbackError('invalid_chat_response')
+            _invalid('invalid_paragraph_shape')
         text,refs=item['text'],item['evidence_ids']
         if (not isinstance(text,str) or not 3<=len(text)<=1000 or not re.search('[\u0590-\u05ff]',text)
-            or re.search(r'[\d<>]',text) or not isinstance(refs,list) or not 1<=len(refs)<=6
-            or any(not isinstance(r,str) or r not in evidence['facts'] for r in refs)):
-            raise FeedbackError('invalid_chat_response')
-        paragraphs.append({'text':text,'evidence':[resolve_evidence(r,evidence['facts'],mapping,session) for r in dict.fromkeys(refs)]})
+            or re.search(r'[<>]',text) or not isinstance(refs,list) or not 1<=len(refs)<=6):
+            _invalid('invalid_paragraph_content')
+        valid_refs=list(dict.fromkeys(r for r in refs if isinstance(r,str) and r in evidence['facts']))
+        if not valid_refs:
+            _invalid('no_valid_evidence')
+        if not _numbers_are_grounded(text,valid_refs,evidence['facts']):
+            _invalid('ungrounded_number')
+        paragraphs.append({'text':text,'evidence':[resolve_evidence(r,evidence['facts'],mapping,session) for r in valid_refs]})
     updated=recent+[{'role':'user','selected_rep':selected,'text':message.strip()},
                     {'role':'assistant','selected_rep':selected,'text':answer}]
     return {'paragraphs':paragraphs,'revision':revision,'history_reset':reset,'history':updated[-8:],

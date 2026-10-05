@@ -17,11 +17,12 @@ from gymbromatics.feedback_provider import FeedbackError
 
 class Provider:
     model='test-only'
-    def __init__(self): self.requests=[];self.bad=False;self.error=False
+    def __init__(self): self.requests=[];self.bad=False;self.error=False;self.content=None
     def generate(self,system,payload,schema):
         self.requests.append(copy.deepcopy(payload))
         if self.error: raise FeedbackError('quota_exceeded')
         selected=payload['selected_rep'] or 'r1'
+        if self.content is not None: return {'content':copy.deepcopy(self.content)}
         return {'content':{'paragraphs':[{'text':'משך העלייה מתועד בנתוני החזרה. ניתן לצפות בחזרה ולבדוק את הסימונים.',
                                          'evidence_ids':['invented' if self.bad else selected+'.ascent_duration']}]}}
 
@@ -50,6 +51,26 @@ def test_unknown_evidence_not_displayed(data):
     with pytest.raises(FeedbackError,match='invalid_chat_response'):
         reply(data,'בדיקה',None,None,[],None,provider)
     with pytest.raises(ValueError): reply(data,'בדיקה','wrong',None,[],None,provider)
+
+
+def test_unknown_evidence_is_filtered_when_another_reference_is_valid(data):
+    provider=Provider()
+    provider.content={'paragraphs':[{'text':'משך העלייה מופיע בראיות של החזרה.',
+        'evidence_ids':['invented','r1.ascent_duration','r1.ascent_duration']}]}
+    result=reply(data,'בדיקה',None,None,[],None,provider)
+    assert [item['id'] for item in result['paragraphs'][0]['evidence']]==['r1.ascent_duration']
+
+
+def test_numeric_claim_must_match_cited_evidence(data,caplog):
+    provider=Provider()
+    provider.content={'paragraphs':[{'text':'משך העלייה הוא 0.87 שניות.',
+        'evidence_ids':['r1.ascent_duration']}]}
+    result=reply(data,'כמה זמן?',None,None,[],None,provider)
+    assert result['paragraphs'][0]['text'].endswith('שניות.')
+    provider.content['paragraphs'][0]['text']='משך העלייה הוא 99 שניות.'
+    with pytest.raises(FeedbackError,match='invalid_chat_response'):
+        reply(data,'כמה זמן?',None,None,[],None,provider)
+    assert 'reason=ungrounded_number' in caplog.text
 
 
 @pytest.fixture
