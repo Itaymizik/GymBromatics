@@ -508,7 +508,7 @@ function createTechniquePanel({data,video,seekReference,selectEvidence,getReps})
 function createChatPanel({data,getReps,getActiveId,chooseRep,selectEvidence}) {
   const $=id=>document.getElementById(id),form=$('chat-form'),input=$('chat-input'),select=$('chat-rep');
   const log=$('chat-log'),status=$('chat-status'),send=$('chat-send');
-  const online=!!window.GYM_CHAT_TOKEN&&location.protocol==='http:';
+  const online=!!window.GYM_CHAT_TOKEN&&['http:','https:'].includes(location.protocol);
   let conversation=null,busy=false,signature=null;
   const foot=()=>{const choice=$('near-foot')?.value;return ['left','right'].includes(choice)?choice:null;};
   const snapshot=()=>JSON.stringify({reps:getReps(),foot:foot()});

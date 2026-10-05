@@ -126,6 +126,14 @@ def test_health_and_session_contract(api,data):
     assert app.state.runtime.page_token in page.text
 
 
+def test_chat_ui_accepts_secure_cloud_origin():
+    source=Path('gymbromatics/chat_ui.js').read_text(encoding='utf-8')
+    assert "['http:','https:'].includes(location.protocol)" in source
+    for name in ('squatsample','squat_test2'):
+        artifact=Path(f'demo_artifacts/{name}_dashboard.html').read_text(encoding='utf-8')
+        assert "['http:','https:'].includes(location.protocol)" in artifact
+
+
 @pytest.fixture
 def live_server():
     provider=Provider()
