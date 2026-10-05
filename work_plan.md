@@ -56,8 +56,8 @@ Google Cloud הוא ספק היעד המועדף לתרגיל זה משום שה
 - [x] בדיקות אינטגרציה לשני הסשנים, הרשאות, validation ו־health checks.
 - [x] יצירת `Dockerfile`, `.dockerignore` ו־`docker-compose.yml` ללא secrets ב־image.
 - [x] בניית image והרצת smoke test מקומי דרך Docker Compose.
-- [ ] החלטה כיצד לארוז או לאחסן את artifacts של שני הדמואים ב־repository/CI.
-- [ ] GitHub Actions לבדיקות, בניית image ופריסה ל־staging.
+- [x] אריזת ארבעת artifacts הנדרשים לשני הדמואים תחת `demo_artifacts/`.
+- [x] GitHub Actions לבדיקות ולבניית image; פריסה ל־staging תתווסף בשלב הענן.
 - [ ] Secret Manager, Cloud Run וכתובת HTTPS.
 
 ### מטרה
