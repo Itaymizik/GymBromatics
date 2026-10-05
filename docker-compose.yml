@@ -1,0 +1,15 @@
+services:
+  api:
+    build:
+      context: .
+    ports:
+      - "8765:8080"
+    env_file:
+      - .env.local
+    environment:
+      PORT: "8080"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp

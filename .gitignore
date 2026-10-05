@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+models/*.task
+models/*.download
+outputs/
+data/
+*.pdf
+.env
+.env.*
+!.env.example
