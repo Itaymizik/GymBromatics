@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Itaymizik/GymBromatics/actions/workflows/ci.yml/badge.svg)](https://github.com/Itaymizik/GymBromatics/actions/workflows/ci.yml)
 
+Staging: <https://gymbromatics-staging-314205128886.me-west1.run.app>
+
 Local video processing with MediaPipe Pose Landmarker (BlazePose) and OpenCV.
 Extracts 33 named body landmarks per frame and produces an MP4 skeleton overlay
 plus a JSON time series. No training or cloud inference is involved.

@@ -58,7 +58,7 @@ Google Cloud הוא ספק היעד המועדף לתרגיל זה משום שה
 - [x] בניית image והרצת smoke test מקומי דרך Docker Compose.
 - [x] אריזת ארבעת artifacts הנדרשים לשני הדמואים תחת `demo_artifacts/`.
 - [x] GitHub Actions לבדיקות ולבניית image; פריסה ל־staging תתווסף בשלב הענן.
-- [ ] Secret Manager, Cloud Run וכתובת HTTPS.
+- [x] Secret Manager, Cloud Run וכתובת HTTPS עבור סביבת staging.
 
 ### מטרה
 

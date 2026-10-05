@@ -1,0 +1,17 @@
+[
+  {
+    "name": "delete-images-older-than-seven-days",
+    "action": {"type": "Delete"},
+    "condition": {
+      "tagState": "any",
+      "olderThan": "7d"
+    }
+  },
+  {
+    "name": "keep-three-recent-images",
+    "action": {"type": "Keep"},
+    "mostRecentVersions": {
+      "keepCount": 3
+    }
+  }
+]
