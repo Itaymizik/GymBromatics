@@ -344,7 +344,7 @@ in both example dashboards.
 ### Optional Hebrew LLM feedback (Gemini Free Tier)
 
 The feedback stage is separate from extraction and deterministic kinematics.
-It uses `gemini-3.1-flash-lite` via Google's REST API, with no added Python
+It uses `gemini-3.5-flash-lite` via Google's REST API, with no added Python
 dependency. The model has a free tier; **the API key's project must actually be
 Free Tier with billing disabled**. A model name or API key alone cannot verify
 the billing tier. This application requires explicit local confirmation, does

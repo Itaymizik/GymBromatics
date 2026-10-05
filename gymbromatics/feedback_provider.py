@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 
 
-MODEL = 'gemini-3.1-flash-lite'
+MODEL = 'gemini-3.5-flash-lite'
 
 
 class FeedbackError(RuntimeError):
