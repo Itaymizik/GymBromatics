@@ -17,6 +17,9 @@ Never infer fatigue, injury, knee valgus, symmetry, lumbar rounding, load or bar
 Speed is shoulder-midpoint vertical speed in px/s. Depth is the <=90 degree knee rule, not parallel.
 Clear means no configured rule triggered, review means inspect the video, unavailable means unknown.
 Missing measurements are not zero. A median alone cannot establish consistency or a trend.
+"Slowest repetition" is ambiguous. Unless the user names a metric, distinguish all available
+session.extreme facts: lowest mean ascent speed, lowest peak ascent speed, and longest ascent time.
+If the user refers to the summary table or Peak ascent velocity, use lowest peak ascent speed.
 Explain what can and cannot be concluded. Do not prescribe training loads or medical treatment.
 Do not compute new numbers. You may repeat a number only when it appears in a cited evidence fact.
 Return 1-4 paragraphs, each {text,evidence_ids}. Cite actual relevant fact IDs for session claims.
@@ -62,6 +65,8 @@ def _numbers_are_grounded(text: str, refs: list[str], facts: dict[str, Any]) -> 
     allowed = [number for ref in refs for number in _fact_numbers(facts[ref])]
     allowed.extend(float(match.group(1)) for ref in refs
                    if (match := re.match(r'^r(\d+)(?:\.|$)', ref)))
+    allowed.extend(float(match.group(1)) for ref in refs
+                   if (match := re.match(r'^r(\d+)$', str(facts[ref].get('rep_id', '')))))
     for token in NUMBER_PATTERN.findall(text):
         raw = token.rstrip('%').replace(',', '.')
         try:
@@ -115,6 +120,33 @@ def resolve_evidence(ref: str, facts: dict[str, Any], mapping: dict[str,str], se
     return {'id':ref,'label':label,'detail':detail,'fact':fact,'links':links}
 
 
+def _direct_comparison_answer(message: str, facts: dict[str, Any]) -> dict[str, Any] | None:
+    """Answer objective extrema in code so the model cannot silently choose a metric."""
+    lowered = message.casefold()
+    if not re.search(r'איט(?:י|ית|יות)', lowered):
+        return None
+    hints = ('ממוצע', 'ממוצעת', 'שיא', 'peak', 'משך', 'זמן עלייה', 'ארוכה')
+    if any(hint in lowered for hint in hints):
+        return None
+    refs = [
+        'session.extreme.slowest_peak_ascent_velocity',
+        'session.extreme.slowest_mean_ascent_velocity',
+        'session.extreme.longest_ascent_duration',
+    ]
+    if any(ref not in facts for ref in refs):
+        return None
+    peak, mean, duration = (facts[ref] for ref in refs)
+    ordinal = lambda fact: int(str(fact['rep_id']).removeprefix('r'))
+    text = (
+        'המונח החזרה הכי איטית אינו חד־משמעי, כי אפשר למדוד אותו לפי מהירות שיא, '
+        'מהירות ממוצעת או משך העלייה. '
+        f"לפי מהירות השיא שמופיעה בטבלת הסיכום זו חזרה {ordinal(peak)}, עם {peak['value']:.2f} פיקסלים לשנייה. "
+        f"לפי המהירות הממוצעת זו חזרה {ordinal(mean)}, עם {mean['value']:.2f} פיקסלים לשנייה. "
+        f"לפי משך העלייה זו חזרה {ordinal(duration)}, עם {duration['value']:.2f} שניות."
+    )
+    return {'paragraphs': [{'text': text, 'evidence_ids': refs}]}
+
+
 def reply(session: dict[str, Any], message: str, selected_id: str | None, foot_side: str | None,
           history: list[dict[str,Any]], previous_revision: str | None, provider: FeedbackProvider) -> dict[str,Any]:
     if not isinstance(message,str) or not 1<=len(message.strip())<=1500:
@@ -129,7 +161,10 @@ def reply(session: dict[str, Any], message: str, selected_id: str | None, foot_s
     recent=[] if reset else history[-8:]
     selected=next((k for k,v in mapping.items() if v==selected_id),None)
     payload={'evidence':evidence,'selected_rep':selected,'history':recent,'question':message.strip()}
-    answer=provider.generate(SYSTEM,payload,SCHEMA)['content']
+    answer=_direct_comparison_answer(message.strip(),evidence['facts'])
+    answer_source='computed' if answer is not None else 'llm'
+    if answer is None:
+        answer=provider.generate(SYSTEM,payload,SCHEMA)['content']
     if not isinstance(answer,dict) or set(answer)!={'paragraphs'} or not isinstance(answer['paragraphs'],list) or not 1<=len(answer['paragraphs'])<=4:
         _invalid('invalid_envelope')
     paragraphs=[]
@@ -149,4 +184,4 @@ def reply(session: dict[str, Any], message: str, selected_id: str | None, foot_s
     updated=recent+[{'role':'user','selected_rep':selected,'text':message.strip()},
                     {'role':'assistant','selected_rep':selected,'text':answer}]
     return {'paragraphs':paragraphs,'revision':revision,'history_reset':reset,'history':updated[-8:],
-            'limitations':LIMITATIONS,'model':provider.model}
+            'limitations':LIMITATIONS,'model':provider.model,'answer_source':answer_source}

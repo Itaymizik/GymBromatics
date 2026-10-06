@@ -81,6 +81,31 @@ def test_cited_repetition_ordinal_is_grounded(data):
     assert result['paragraphs'][0]['evidence'][0]['id']=='r1.ascent_duration'
 
 
+def test_session_extreme_can_ground_its_repetition_number(data):
+    provider=Provider()
+    provider.content={'paragraphs':[{'text':'לפי מהירות השיא, חזרה 1 היא האיטית ביותר.',
+        'evidence_ids':['session.extreme.slowest_peak_ascent_velocity']}]}
+    result=reply(data,'מהי החזרה הכי איטית?',None,None,[],None,provider)
+    evidence=result['paragraphs'][0]['evidence'][0]
+    assert evidence['fact']['metric']=='peak_ascent_velocity'
+    assert evidence['links'][0]['rep_id']==data['repetitions'][0]['id']
+
+
+def test_ambiguous_slowest_question_is_computed_across_all_metrics(data):
+    provider=Provider()
+    result=reply(data,'מהי החזרה הכי איטית?',None,None,[],None,provider)
+    assert provider.requests==[]
+    assert result['answer_source']=='computed'
+    evidence=result['paragraphs'][0]['evidence']
+    assert {item['id'] for item in evidence}=={
+        'session.extreme.slowest_peak_ascent_velocity',
+        'session.extreme.slowest_mean_ascent_velocity',
+        'session.extreme.longest_ascent_duration',
+    }
+    assert {item['links'][0]['rep_id'] for item in evidence}=={
+        data['repetitions'][0]['id'],data['repetitions'][1]['id']}
+
+
 @pytest.fixture
 def api():
     provider=Provider()

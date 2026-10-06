@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -102,6 +103,21 @@ def prepare_evidence(session: dict[str, Any], foot_side: str | None = None) -> t
     for name, reference in comparisons['session_median'].items():
         facts[f'session.median.{name}'] = {'rep_id': None, 'kind': 'median', 'metric': name,
                                          'unit': comparisons['units'][name], **reference}
+    extreme_specs = {
+        'slowest_mean_ascent_velocity': ('mean_ascent_velocity', min, 'lowest_value'),
+        'slowest_peak_ascent_velocity': ('peak_ascent_velocity', min, 'lowest_value'),
+        'longest_ascent_duration': ('ascent_duration', max, 'highest_value'),
+    }
+    for key, (metric, choose, criterion) in extreme_specs.items():
+        available = [(rep['id'], result['metrics'][metric].get('value'))
+                     for rep, result in zip(reps, comparisons['repetitions'])]
+        available = [(rep_id, value) for rep_id, value in available
+                     if isinstance(value, (int, float)) and math.isfinite(value)]
+        if available:
+            rep_id, value = choose(available, key=lambda item: item[1])
+            facts[f'session.extreme.{key}'] = {'rep_id': rep_id, 'kind': 'extreme',
+                'metric': metric, 'criterion': criterion, 'unit': comparisons['units'][metric],
+                'value': value, 'valid_repetitions': len(available)}
     facts['session.context'] = {'rep_id': None, 'kind': 'context', 'rep_count': len(reps),
         'technique_status': technique['status'], 'foot_side': technique['foot_side'],
         'technique_unavailable_reason': technique.get('reason'),

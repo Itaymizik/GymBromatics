@@ -54,6 +54,12 @@ def test_demo_evidence(name,count):
     assert evidence['facts']['r1.ascent_duration']['value'] == pytest.approx(
         (session['repetitions'][0]['end']-session['repetitions'][0]['bottom'])/session['fps'])
     assert evidence['facts']['r1.mean_ascent_velocity']['unit'] == 'px/s'
+    mean_fact = evidence['facts']['session.extreme.slowest_mean_ascent_velocity']
+    peak_fact = evidence['facts']['session.extreme.slowest_peak_ascent_velocity']
+    duration_fact = evidence['facts']['session.extreme.longest_ascent_duration']
+    assert mean_fact['rep_id'] == min(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.mean_ascent_velocity']['value'])
+    assert peak_fact['rep_id'] == min(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.peak_ascent_velocity']['value'])
+    assert duration_fact['rep_id'] == max(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.ascent_duration']['value'])
 
 
 def test_edited_input_recomputed_and_names_not_sent(session):
