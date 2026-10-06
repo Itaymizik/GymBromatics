@@ -12,3 +12,5 @@ models
 tests
 *.pdf
 outputs
+docs
+presentation
