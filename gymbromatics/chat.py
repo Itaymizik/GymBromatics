@@ -178,7 +178,7 @@ def reply(session: dict[str, Any], message: str, selected_id: str | None, foot_s
         valid_refs=list(dict.fromkeys(r for r in refs if isinstance(r,str) and r in evidence['facts']))
         if not valid_refs:
             _invalid('no_valid_evidence')
-        if not _numbers_are_grounded(text,valid_refs,evidence['facts']):
+        if answer_source=='llm' and not _numbers_are_grounded(text,valid_refs,evidence['facts']):
             _invalid('ungrounded_number')
         paragraphs.append({'text':text,'evidence':[resolve_evidence(r,evidence['facts'],mapping,session) for r in valid_refs]})
     updated=recent+[{'role':'user','selected_rep':selected,'text':message.strip()},
