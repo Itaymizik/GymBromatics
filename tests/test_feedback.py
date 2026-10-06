@@ -60,6 +60,10 @@ def test_demo_evidence(name,count):
     assert mean_fact['rep_id'] == min(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.mean_ascent_velocity']['value'])
     assert peak_fact['rep_id'] == min(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.peak_ascent_velocity']['value'])
     assert duration_fact['rep_id'] == max(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.ascent_duration']['value'])
+    longest_total = evidence['facts']['session.extreme.longest_total_duration']
+    shortest_total = evidence['facts']['session.extreme.shortest_total_duration']
+    assert longest_total['rep_id'] == max(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.duration']['value'])
+    assert shortest_total['rep_id'] == min(evidence['rep_ids'], key=lambda rep: evidence['facts'][rep+'.duration']['value'])
 
 
 def test_edited_input_recomputed_and_names_not_sent(session):

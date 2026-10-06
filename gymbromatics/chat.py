@@ -123,6 +123,30 @@ def resolve_evidence(ref: str, facts: dict[str, Any], mapping: dict[str,str], se
 def _direct_comparison_answer(message: str, facts: dict[str, Any]) -> dict[str, Any] | None:
     """Answer objective extrema in code so the model cannot silently choose a metric."""
     lowered = message.casefold()
+    asks_total_duration = (
+        'חזרה' in lowered
+        and any(term in lowered for term in ('זמן', 'משך', 'לקחה', 'ארכה'))
+    )
+    asks_longest = any(term in lowered for term in (
+        'הכי הרבה זמן', 'הארוכה ביותר', 'הכי ארוכה', 'משך הכי ארוך', 'הכי הרבה',
+    ))
+    asks_shortest = any(term in lowered for term in (
+        'הכי מעט זמן', 'הקצרה ביותר', 'הכי קצרה', 'משך הכי קצר', 'הכי מעט',
+    ))
+    if asks_total_duration and (asks_longest or asks_shortest):
+        ref = ('session.extreme.longest_total_duration' if asks_longest
+               else 'session.extreme.shortest_total_duration')
+        fact = facts.get(ref)
+        if fact is None:
+            return None
+        repetition_number = int(str(fact['rep_id']).removeprefix('r'))
+        description = 'הארוך ביותר' if asks_longest else 'הקצר ביותר'
+        text = (
+            f"משך החזרה הכולל {description} נמדד בחזרה {repetition_number}, "
+            f"ונמשך {fact['value']:.2f} שניות. "
+            'המשך הכולל מחושב מתחילת הירידה ועד סיום העלייה.'
+        )
+        return {'paragraphs': [{'text': text, 'evidence_ids': [ref]}]}
     if not re.search(r'איט(?:י|ית|יות)', lowered):
         return None
     hints = ('ממוצע', 'ממוצעת', 'שיא', 'peak', 'משך', 'זמן עלייה', 'ארוכה')

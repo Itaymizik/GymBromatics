@@ -107,6 +107,8 @@ def prepare_evidence(session: dict[str, Any], foot_side: str | None = None) -> t
         'slowest_mean_ascent_velocity': ('mean_ascent_velocity', min, 'lowest_value'),
         'slowest_peak_ascent_velocity': ('peak_ascent_velocity', min, 'lowest_value'),
         'longest_ascent_duration': ('ascent_duration', max, 'highest_value'),
+        'longest_total_duration': ('duration', max, 'highest_value'),
+        'shortest_total_duration': ('duration', min, 'lowest_value'),
     }
     for key, (metric, choose, criterion) in extreme_specs.items():
         available = [(rep['id'], result['metrics'][metric].get('value'))

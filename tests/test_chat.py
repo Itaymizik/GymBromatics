@@ -106,6 +106,30 @@ def test_ambiguous_slowest_question_is_computed_across_all_metrics(data):
         data['repetitions'][0]['id'],data['repetitions'][1]['id']}
 
 
+def test_longest_total_duration_is_computed(data):
+    provider=Provider()
+    result=reply(data,'איזו חזרה לקחה הכי הרבה זמן?',None,None,[],None,provider)
+    assert provider.requests==[]
+    assert result['answer_source']=='computed'
+    evidence=result['paragraphs'][0]['evidence']
+    assert len(evidence)==1
+    assert evidence[0]['id']=='session.extreme.longest_total_duration'
+    assert evidence[0]['fact']['metric']=='duration'
+    expected=max(range(len(data['repetitions'])),key=lambda i:data['repetitions'][i]['end']-data['repetitions'][i]['start'])
+    assert evidence[0]['links'][0]['rep_id']==data['repetitions'][expected]['id']
+
+
+def test_shortest_total_duration_is_computed(data):
+    provider=Provider()
+    result=reply(data,'איזו חזרה לקחה הכי מעט זמן?',None,None,[],None,provider)
+    assert provider.requests==[]
+    assert result['answer_source']=='computed'
+    evidence=result['paragraphs'][0]['evidence']
+    assert evidence[0]['id']=='session.extreme.shortest_total_duration'
+    expected=min(range(len(data['repetitions'])),key=lambda i:data['repetitions'][i]['end']-data['repetitions'][i]['start'])
+    assert evidence[0]['links'][0]['rep_id']==data['repetitions'][expected]['id']
+
+
 @pytest.fixture
 def api():
     provider=Provider()
