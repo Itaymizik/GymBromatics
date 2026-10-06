@@ -27,7 +27,7 @@ Pose estimation + signal processing + biomechanics heuristics → annotated vide
 | 🔁 **Rep detection** | Automatic squat-cycle proposals with a draggable boundary editor |
 | 🩺 **Technique notes** | Depth (knee ≤ 90°), hip-first rise and heel lift, each linked to evidence frames |
 | 📊 **Rep comparisons** | Duration, depth, pause and velocity compared against the previous rep and the session median |
-| 💬 **AI coach** *(optional)* | Hebrew feedback and chat from Gemini Free Tier, based only on computed metrics (never the video) |
+| 💬 **AI coach** *(optional)* | Hebrew feedback and chat from Gemini Free Tier, based only on computed metrics |
 
 <table>
   <tr>
