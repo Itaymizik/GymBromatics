@@ -100,3 +100,24 @@ without exposing an internal stack trace through the API.
 
 The local worker uses `.gymbromatics-local` for job records, objects, and temporary
 work files. This directory is ignored by Git.
+
+## Try the browser upload UI
+
+Run the API and worker in separate PowerShell windows:
+
+```powershell
+.\.venv\Scripts\python.exe -m gymbromatics.chat_server
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m gymbromatics.worker --watch
+```
+
+Open `http://127.0.0.1:8765/upload`, choose a side-view squat video, and select
+**העלאה וניתוח**. The page shows real upload progress, polls the job state every
+two seconds, resumes polling after a page refresh, and exposes all four result
+links when processing completes.
+
+This UI currently targets the local adapters. It must not be treated as the cloud
+upload implementation; the cloud version will replace the API-proxied upload with
+a signed object-storage URL.

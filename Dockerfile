@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir --requirement requirements-api.txt
 COPY gymbromatics ./gymbromatics
 COPY demo_artifacts ./demo_artifacts
 
+RUN mkdir -p /app/.gymbromatics-local \
+    && chown -R gymbromatics:gymbromatics /app/.gymbromatics-local
+
 USER gymbromatics
 EXPOSE 8080
 

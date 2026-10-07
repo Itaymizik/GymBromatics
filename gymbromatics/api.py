@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .chat import reply
@@ -213,13 +213,24 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
-        links = "".join(
+        links = '<li><a href="/upload">ניתוח סרטון חדש</a></li>' + "".join(
             f'<li><a href="/sessions/{analysis_id}">{html.escape(record["data"]["name"])}</a></li>'
             for analysis_id, record in runtime.sessions.items()
         )
         return (
             '<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8">'
             "<title>GymBromatics</title><h1>בחירת סשן</h1><ul>" + links + "</ul></html>"
+        )
+
+    @app.get("/upload", response_class=HTMLResponse, include_in_schema=False)
+    async def upload_page() -> str:
+        return Path(__file__).with_name("upload.html").read_text(encoding="utf-8")
+
+    @app.get("/assets/upload.js", response_class=PlainTextResponse, include_in_schema=False)
+    async def upload_script() -> PlainTextResponse:
+        return PlainTextResponse(
+            Path(__file__).with_name("upload.js").read_text(encoding="utf-8"),
+            media_type="application/javascript",
         )
 
     @app.get("/sessions/{analysis_id}", response_class=HTMLResponse, include_in_schema=False)
