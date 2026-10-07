@@ -65,6 +65,21 @@ class VideoStorage(Protocol):
     def delete_session(self, session_id: str) -> None: ...
 
 
+class LocalUploadStorage(VideoStorage, Protocol):
+    """Development adapter that receives bytes through the local API server."""
+
+    def accept_upload(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        source: BinaryIO,
+        content_type: str,
+        max_bytes: int,
+        expected_checksum_sha256: str | None = None,
+    ) -> StoredObject: ...
+
+
 class LocalVideoStorage:
     """Filesystem adapter used for development and deterministic tests."""
 

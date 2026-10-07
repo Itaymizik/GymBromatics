@@ -52,6 +52,18 @@ class ConfirmUploadRequest(StrictModel):
     checksum_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
 
 
+class UploadReceiptResponse(StrictModel):
+    session_id: str
+    status: Literal[JobStatus.CREATED]
+    size_bytes: int = Field(gt=0)
+    checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ConfirmUploadResponse(StrictModel):
+    session_id: str
+    status: Literal[JobStatus.QUEUED]
+
+
 class JobStatusResponse(StrictModel):
     session_id: str
     status: JobStatus

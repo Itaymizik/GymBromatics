@@ -51,6 +51,7 @@ class ProcessingJob:
     input_object_key: str
     created_at: datetime
     updated_at: datetime
+    declared_checksum_sha256: str | None = None
     checksum_sha256: str | None = None
     attempt: int = 0
     error_code: str | None = None
@@ -93,6 +94,7 @@ def new_processing_job(
     content_type: str,
     expected_size_bytes: int,
     input_object_key: str,
+    declared_checksum_sha256: str | None = None,
     session_id: str | None = None,
     now: datetime | None = None,
 ) -> ProcessingJob:
@@ -106,6 +108,9 @@ def new_processing_job(
         input_object_key=input_object_key,
         created_at=timestamp,
         updated_at=timestamp,
+        declared_checksum_sha256=declared_checksum_sha256.lower()
+        if declared_checksum_sha256
+        else None,
     )
 
 

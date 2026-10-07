@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+from datetime import timedelta
 import html
 import json
 from pathlib import Path
 import secrets
+from tempfile import SpooledTemporaryFile
 import threading
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -18,6 +21,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .chat import reply
 from .feedback_provider import FeedbackError, FeedbackProvider, GeminiFreeTier
+from .job_repository import JobNotFound, JobRepository, LocalJobRepository
+from .jobs import JobStatus, ProcessingJob, new_processing_job
+from .storage import (
+    ChecksumMismatch,
+    LocalUploadStorage,
+    LocalVideoStorage,
+    StorageObjectNotFound,
+    UploadTooLarge,
+)
+from .upload_contract import (
+    ConfirmUploadRequest,
+    ConfirmUploadResponse,
+    CreateVideoSessionRequest,
+    CreateVideoSessionResponse,
+    JobStatusResponse,
+    MAX_VIDEO_BYTES,
+    UploadInstruction,
+    UploadReceiptResponse,
+)
 
 
 DEFAULT_DASHBOARDS = (
@@ -25,6 +47,7 @@ DEFAULT_DASHBOARDS = (
     Path("demo_artifacts/squat_test2_dashboard.html"),
 )
 MAX_REQUEST_BYTES = 32 * 1024
+LOCAL_RUNTIME_ROOT = Path(".gymbromatics-local")
 
 
 class RepetitionInput(BaseModel):
@@ -66,7 +89,13 @@ class ConversationState(BaseModel):
 class ApplicationState:
     """Mutable process state kept behind locks until persistence is introduced."""
 
-    def __init__(self, dashboard_paths: list[Path], provider: FeedbackProvider | None = None) -> None:
+    def __init__(
+        self,
+        dashboard_paths: list[Path],
+        provider: FeedbackProvider | None = None,
+        video_storage: LocalUploadStorage | None = None,
+        job_repository: JobRepository | None = None,
+    ) -> None:
         self.sessions: dict[str, dict[str, Any]] = {}
         for path in dashboard_paths:
             html_path = path.resolve()
@@ -81,6 +110,8 @@ class ApplicationState:
                 raise ValueError(f"Duplicate analysis_id: {analysis_id}")
             self.sessions[analysis_id] = {"data": data, "path": html_path}
         self.provider = provider or GeminiFreeTier.from_env()
+        self.video_storage = video_storage or LocalVideoStorage(LOCAL_RUNTIME_ROOT / "objects")
+        self.job_repository = job_repository or LocalJobRepository(LOCAL_RUNTIME_ROOT / "jobs")
         self.page_token = secrets.token_urlsafe(32)
         self.conversations: dict[str, ConversationState] = {}
         self.state_lock = threading.Lock()
@@ -101,10 +132,17 @@ def _same_origin(request: Request) -> str:
 def create_app(
     dashboard_paths: list[Path] | None = None,
     provider: FeedbackProvider | None = None,
+    video_storage: LocalUploadStorage | None = None,
+    job_repository: JobRepository | None = None,
 ) -> FastAPI:
     """Application factory keeps configuration explicit and tests isolated."""
 
-    runtime = ApplicationState(list(dashboard_paths or DEFAULT_DASHBOARDS), provider)
+    runtime = ApplicationState(
+        list(dashboard_paths or DEFAULT_DASHBOARDS),
+        provider,
+        video_storage,
+        job_repository,
+    )
     app = FastAPI(
         title="GymBromatics API",
         version="1.0.0",
@@ -126,9 +164,14 @@ def create_app(
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Response:
         content_length = request.headers.get("content-length")
+        request_limit = (
+            MAX_VIDEO_BYTES
+            if request.method == "PUT" and request.url.path.endswith("/upload")
+            else MAX_REQUEST_BYTES
+        )
         if request.method in {"POST", "PUT", "PATCH"} and content_length:
             try:
-                too_large = int(content_length) > MAX_REQUEST_BYTES
+                too_large = int(content_length) > request_limit
             except ValueError:
                 too_large = True
             if too_large:
@@ -201,6 +244,172 @@ def create_app(
             "duration": data["duration"],
             "repetitions": data["repetitions"],
         }
+
+    def get_video_job(session_id: str) -> ProcessingJob:
+        try:
+            return runtime.job_repository.get(session_id)
+        except (JobNotFound, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="video_session_not_found"
+            ) from None
+
+    @app.post(
+        "/api/video-sessions",
+        response_model=CreateVideoSessionResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["video-processing"],
+    )
+    async def create_video_session(
+        body: CreateVideoSessionRequest, request: Request
+    ) -> CreateVideoSessionResponse:
+        session_id = str(uuid4())
+        target = runtime.video_storage.create_upload_target(
+            session_id,
+            filename=body.filename,
+            content_type=body.content_type,
+            expires_in=timedelta(minutes=15),
+        )
+        job = new_processing_job(
+            session_id=session_id,
+            original_filename=body.filename,
+            content_type=body.content_type,
+            expected_size_bytes=body.size_bytes,
+            input_object_key=target.object_key,
+            declared_checksum_sha256=body.checksum_sha256,
+        )
+        runtime.job_repository.create(job)
+        upload_url = str(request.url_for("upload_local_video", session_id=session_id))
+        return CreateVideoSessionResponse(
+            session_id=session_id,
+            status=JobStatus.CREATED,
+            upload=UploadInstruction(
+                url=upload_url,
+                headers=target.headers,
+                expires_at=target.expires_at,
+            ),
+        )
+
+    @app.put(
+        "/api/video-sessions/{session_id}/upload",
+        response_model=UploadReceiptResponse,
+        tags=["video-processing"],
+    )
+    async def upload_local_video(
+        session_id: str, request: Request
+    ) -> UploadReceiptResponse:
+        job = get_video_job(session_id)
+        if job.status != JobStatus.CREATED:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="upload_closed")
+        if request.headers.get("content-type", "").split(";", 1)[0] != job.content_type:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="content_type_mismatch",
+            )
+
+        size = 0
+        with SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as upload:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > job.expected_size_bytes or size > MAX_VIDEO_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="upload_size_mismatch",
+                    )
+                upload.write(chunk)
+            if size != job.expected_size_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="upload_size_mismatch",
+                )
+            upload.seek(0)
+            try:
+                stored = await run_in_threadpool(
+                    runtime.video_storage.accept_upload,
+                    session_id,
+                    filename=job.original_filename,
+                    source=upload,
+                    content_type=job.content_type,
+                    max_bytes=job.expected_size_bytes,
+                    expected_checksum_sha256=job.declared_checksum_sha256,
+                )
+            except UploadTooLarge:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="upload_size_mismatch",
+                ) from None
+            except ChecksumMismatch:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="checksum_mismatch",
+                ) from None
+        return UploadReceiptResponse(
+            session_id=session_id,
+            status=JobStatus.CREATED,
+            size_bytes=stored.size_bytes,
+            checksum_sha256=stored.checksum_sha256,
+        )
+
+    @app.post(
+        "/api/video-sessions/{session_id}/upload-complete",
+        response_model=ConfirmUploadResponse,
+        tags=["video-processing"],
+    )
+    async def confirm_video_upload(
+        session_id: str, body: ConfirmUploadRequest
+    ) -> ConfirmUploadResponse:
+        job = get_video_job(session_id)
+        if job.status == JobStatus.CREATED:
+            try:
+                stored = runtime.video_storage.inspect(job.input_object_key)
+            except StorageObjectNotFound:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="upload_not_found"
+                ) from None
+            if (
+                stored.size_bytes != body.size_bytes
+                or stored.size_bytes != job.expected_size_bytes
+                or stored.checksum_sha256 != body.checksum_sha256.lower()
+                or (
+                    job.declared_checksum_sha256 is not None
+                    and stored.checksum_sha256 != job.declared_checksum_sha256
+                )
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="upload_metadata_mismatch",
+                )
+            job = runtime.job_repository.transition(
+                session_id,
+                JobStatus.UPLOADED,
+                expected_version=job.version,
+                checksum_sha256=stored.checksum_sha256,
+            )
+        if job.status == JobStatus.UPLOADED:
+            job = runtime.job_repository.transition(
+                session_id, JobStatus.QUEUED, expected_version=job.version
+            )
+        if job.status != JobStatus.QUEUED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="upload_already_processed"
+            )
+        return ConfirmUploadResponse(session_id=session_id, status=JobStatus.QUEUED)
+
+    @app.get(
+        "/api/video-sessions/{session_id}",
+        response_model=JobStatusResponse,
+        tags=["video-processing"],
+    )
+    async def video_session_status(session_id: str) -> JobStatusResponse:
+        job = get_video_job(session_id)
+        return JobStatusResponse(
+            session_id=job.session_id,
+            status=job.status,
+            attempt=job.attempt,
+            error_code=job.error_code,
+            result_urls=dict(job.result_objects),
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
 
     @app.post("/api/chat", tags=["chat"], dependencies=[Depends(require_chat_request)], deprecated=True)
     @app.post("/sessions/{session_id}/chat", tags=["chat"], dependencies=[Depends(require_chat_request)])
