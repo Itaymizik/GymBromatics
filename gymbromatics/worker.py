@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import logging
+import multiprocessing
 from pathlib import Path
 import tempfile
 import time
@@ -13,7 +15,7 @@ from typing import Mapping, Protocol
 from .dashboard import export_dashboard
 from .extractor import MediaPipePoseExtractor
 from .job_repository import ConcurrentJobUpdate, JobRepository, LocalJobRepository
-from .jobs import JobStatus, ProcessingJob
+from .jobs import JobStatus, ProcessingJob, utc_now
 from .model import DEFAULT_MODEL
 from .pipeline import process_video
 from .squat_logic import SquatKinematics
@@ -31,6 +33,38 @@ class Artifact:
 
 class VideoJobProcessor(Protocol):
     def process(self, input_path: Path, output_dir: Path) -> Mapping[str, Artifact]: ...
+
+
+class ProcessingTimeout(TimeoutError):
+    pass
+
+
+class ProcessorExecutionError(RuntimeError):
+    pass
+
+
+def _processor_entry(
+    processor: VideoJobProcessor,
+    input_path: Path,
+    output_dir: Path,
+    connection,
+) -> None:
+    """Run CPU/native processing in an expendable child process."""
+    try:
+        artifacts = processor.process(input_path, output_dir)
+        connection.send(
+            (
+                "ok",
+                {
+                    name: (str(artifact.path), artifact.content_type)
+                    for name, artifact in artifacts.items()
+                },
+            )
+        )
+    except BaseException as error:
+        connection.send(("error", type(error).__name__, str(error)))
+    finally:
+        connection.close()
 
 
 class MediaPipeVideoJobProcessor:
@@ -79,25 +113,39 @@ class LocalJobWorker:
         processor: VideoJobProcessor,
         *,
         workspace: Path,
+        timeout_seconds: float = 10 * 60,
+        max_attempts: int = 3,
+        backoff_seconds: float = 5.0,
+        lease_seconds: float | None = None,
+        use_subprocess: bool = True,
     ) -> None:
+        if timeout_seconds <= 0 or backoff_seconds < 0:
+            raise ValueError("timeout must be positive and backoff must not be negative")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
         self.repository = repository
         self.storage = storage
         self.processor = processor
         self.workspace = workspace.resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
+        self.backoff_seconds = backoff_seconds
+        self.lease_seconds = (
+            timeout_seconds + 5 * 60 if lease_seconds is None else lease_seconds
+        )
+        if self.lease_seconds <= timeout_seconds:
+            raise ValueError("lease must be longer than processing timeout")
+        self.use_subprocess = use_subprocess
 
     def run_once(self) -> ProcessingJob | None:
-        queued = self.repository.list_by_status(JobStatus.QUEUED, limit=1)
-        if not queued:
-            return None
-        candidate = queued[0]
-        try:
-            job = self.repository.transition(
-                candidate.session_id,
-                JobStatus.PROCESSING,
-                expected_version=candidate.version,
-            )
-        except ConcurrentJobUpdate:
+        now = utc_now()
+        self.recover_stale(now=now)
+        job = self.repository.claim_next_queued(
+            now=now,
+            lease_expires_at=now + timedelta(seconds=self.lease_seconds),
+        )
+        if job is None:
             return None
 
         logger.info("Processing video session %s", job.session_id)
@@ -108,7 +156,7 @@ class LocalJobWorker:
                 workdir = Path(temporary)
                 input_path = workdir / f"input{Path(job.original_filename).suffix.lower()}"
                 self.storage.download(job.input_object_key, input_path)
-                artifacts = self.processor.process(input_path, workdir / "outputs")
+                artifacts = self._execute_processor(input_path, workdir / "outputs")
                 result_objects: dict[str, str] = {}
                 for result_name, artifact in artifacts.items():
                     if not artifact.path.is_file():
@@ -132,14 +180,97 @@ class LocalJobWorker:
         except Exception as error:
             logger.exception("Video session %s failed", job.session_id)
             current = self.repository.get(job.session_id)
-            if current.status == JobStatus.PROCESSING:
-                return self.repository.transition(
-                    job.session_id,
-                    JobStatus.FAILED,
-                    expected_version=current.version,
-                    error_code=self._error_code(error),
+            if current.status == JobStatus.PROCESSING and current.version == job.version:
+                return self._retry_or_fail(current, error, now=utc_now())
+            logger.warning(
+                "Worker lost ownership of video session %s; current state is %s v%d",
+                job.session_id,
+                current.status.value,
+                current.version,
+            )
+            return current
+
+    def _execute_processor(
+        self, input_path: Path, output_dir: Path
+    ) -> Mapping[str, Artifact]:
+        if not self.use_subprocess:
+            return self.processor.process(input_path, output_dir)
+        context = multiprocessing.get_context("spawn")
+        receiver, sender = context.Pipe(duplex=False)
+        process = context.Process(
+            target=_processor_entry,
+            args=(self.processor, input_path, output_dir, sender),
+            daemon=True,
+        )
+        process.start()
+        sender.close()
+        process.join(self.timeout_seconds)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            if process.is_alive():
+                process.kill()
+                process.join()
+            receiver.close()
+            raise ProcessingTimeout(
+                f"video processing exceeded {self.timeout_seconds:g} seconds"
+            )
+        if not receiver.poll():
+            receiver.close()
+            raise ProcessorExecutionError(
+                f"processor exited without a result (exit code {process.exitcode})"
+            )
+        message = receiver.recv()
+        receiver.close()
+        if message[0] == "error":
+            raise ProcessorExecutionError(f"{message[1]}: {message[2]}")
+        return {
+            name: Artifact(Path(path), content_type)
+            for name, (path, content_type) in message[1].items()
+        }
+
+    def recover_stale(self, *, now: datetime | None = None) -> list[ProcessingJob]:
+        timestamp = now or utc_now()
+        recovered: list[ProcessingJob] = []
+        for job in self.repository.list_by_status(JobStatus.PROCESSING):
+            deadline = job.lease_expires_at or (
+                job.updated_at + timedelta(seconds=self.lease_seconds)
+            )
+            if deadline > timestamp:
+                continue
+            try:
+                recovered.append(
+                    self._retry_or_fail(
+                        job,
+                        ProcessingTimeout("processing lease expired"),
+                        now=timestamp,
+                    )
                 )
-            raise
+            except ConcurrentJobUpdate:
+                continue
+        return recovered
+
+    def _retry_or_fail(
+        self, job: ProcessingJob, error: Exception, *, now: datetime
+    ) -> ProcessingJob:
+        error_code = self._error_code(error)
+        if job.attempt < self.max_attempts:
+            delay = self.backoff_seconds * (2 ** max(0, job.attempt - 1))
+            return self.repository.transition(
+                job.session_id,
+                JobStatus.QUEUED,
+                expected_version=job.version,
+                now=now,
+                error_code=error_code,
+                next_attempt_at=now + timedelta(seconds=delay),
+            )
+        return self.repository.transition(
+            job.session_id,
+            JobStatus.FAILED,
+            expected_version=job.version,
+            now=now,
+            error_code=error_code,
+        )
 
     def run_pending(self, *, limit: int | None = None) -> list[ProcessingJob]:
         if limit is not None and limit < 1:
@@ -154,6 +285,8 @@ class LocalJobWorker:
 
     @staticmethod
     def _error_code(error: Exception) -> str:
+        if isinstance(error, ProcessingTimeout):
+            return "processing_timeout"
         if isinstance(error, FileNotFoundError):
             return "required_file_missing"
         if isinstance(error, (ValueError, RuntimeError)):
@@ -168,6 +301,9 @@ def main() -> None:
     parser.add_argument("--confidence", type=float, default=0.5)
     parser.add_argument("--watch", action="store_true", help="Keep polling for new jobs")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
+    parser.add_argument("--timeout-seconds", type=float, default=10 * 60)
+    parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--backoff-seconds", type=float, default=5.0)
     args = parser.parse_args()
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
@@ -177,6 +313,9 @@ def main() -> None:
         LocalVideoStorage(args.runtime_root / "objects"),
         MediaPipeVideoJobProcessor(args.model, args.confidence),
         workspace=args.runtime_root / "work",
+        timeout_seconds=args.timeout_seconds,
+        max_attempts=args.max_attempts,
+        backoff_seconds=args.backoff_seconds,
     )
     while True:
         results = worker.run_pending()

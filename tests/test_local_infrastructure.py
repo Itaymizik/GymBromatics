@@ -1,4 +1,5 @@
 from datetime import timedelta
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pytest
@@ -8,7 +9,7 @@ from gymbromatics.job_repository import (
     JobAlreadyExists,
     LocalJobRepository,
 )
-from gymbromatics.jobs import JobStatus, new_processing_job
+from gymbromatics.jobs import JobStatus, new_processing_job, utc_now
 from gymbromatics.storage import (
     ChecksumMismatch,
     LocalVideoStorage,
@@ -150,3 +151,39 @@ def test_repository_lists_jobs_by_status_in_creation_order(tmp_path) -> None:
 
     assert repository.list_by_status(JobStatus.CREATED, limit=1) == [first]
     assert repository.list_by_status(JobStatus.QUEUED) == []
+
+
+def test_atomic_claim_allows_only_one_repository_instance_to_take_job(tmp_path) -> None:
+    root = tmp_path / "jobs"
+    first_repository = LocalJobRepository(root)
+    second_repository = LocalJobRepository(root)
+    job = new_processing_job(
+        original_filename="squat.mp4",
+        content_type="video/mp4",
+        expected_size_bytes=1,
+        input_object_key="input",
+    )
+    first_repository.create(job)
+    job = first_repository.transition(
+        job.session_id,
+        JobStatus.UPLOADED,
+        expected_version=job.version,
+        checksum_sha256="a" * 64,
+    )
+    first_repository.transition(
+        job.session_id, JobStatus.QUEUED, expected_version=job.version
+    )
+    now = utc_now()
+
+    def claim(repository):
+        return repository.claim_next_queued(
+            now=now, lease_expires_at=now + timedelta(minutes=1)
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(claim, (first_repository, second_repository)))
+
+    successful = [claimed for claimed in claims if claimed is not None]
+    assert len(successful) == 1
+    assert successful[0].status == JobStatus.PROCESSING
+    assert first_repository.get(job.session_id).attempt == 1

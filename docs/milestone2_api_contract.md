@@ -121,3 +121,28 @@ links when processing completes.
 This UI currently targets the local adapters. It must not be treated as the cloud
 upload implementation; the cloud version will replace the API-proxied upload with
 a signed object-storage URL.
+
+## Local worker reliability
+
+The local repository uses an operating-system file lock around each read-modify-write
+operation. `claim_next_queued` selects and moves one eligible job to `processing`
+inside the same lock, so two local worker processes cannot claim the same job.
+
+Each claim records an attempt number and a lease expiry. Processing runs in a child
+process; the parent terminates that process when the configured timeout expires.
+Retryable failures return to `queued` with exponential backoff. A worker also scans
+for expired processing leases before claiming new work, allowing it to recover jobs
+left behind after a worker crash. When the attempt limit is reached, the job becomes
+`failed` with a stable error code.
+
+The defaults are a 10-minute processing timeout, three attempts, and a five-second
+initial backoff. They can be changed locally:
+
+```powershell
+.\.venv\Scripts\python.exe -m gymbromatics.worker --watch `
+  --timeout-seconds 600 --max-attempts 3 --backoff-seconds 5
+```
+
+Backoff doubles after every failed attempt. The processing lease is deliberately
+longer than the timeout, leaving time to persist generated artifacts before another
+worker considers the job stale.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Mapping
 from uuid import UUID, uuid4
@@ -55,6 +55,9 @@ class ProcessingJob:
     checksum_sha256: str | None = None
     attempt: int = 0
     error_code: str | None = None
+    processing_started_at: datetime | None = None
+    lease_expires_at: datetime | None = None
+    next_attempt_at: datetime | None = None
     result_objects: Mapping[str, str] = field(default_factory=dict)
     version: int = 1
 
@@ -66,6 +69,13 @@ class ProcessingJob:
             raise ValueError("attempt and version must not be negative")
         if self.created_at.tzinfo is None or self.updated_at.tzinfo is None:
             raise ValueError("job timestamps must be timezone-aware")
+        for value in (
+            self.processing_started_at,
+            self.lease_expires_at,
+            self.next_attempt_at,
+        ):
+            if value is not None and value.tzinfo is None:
+                raise ValueError("job scheduling timestamps must be timezone-aware")
         object.__setattr__(self, "result_objects", dict(self.result_objects))
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,6 +83,9 @@ class ProcessingJob:
         payload["status"] = self.status.value
         payload["created_at"] = self.created_at.isoformat()
         payload["updated_at"] = self.updated_at.isoformat()
+        for name in ("processing_started_at", "lease_expires_at", "next_attempt_at"):
+            value = getattr(self, name)
+            payload[name] = value.isoformat() if value is not None else None
         payload["schema_version"] = 1
         return payload
 
@@ -85,6 +98,9 @@ class ProcessingJob:
         values["status"] = JobStatus(values["status"])
         values["created_at"] = datetime.fromisoformat(values["created_at"])
         values["updated_at"] = datetime.fromisoformat(values["updated_at"])
+        for name in ("processing_started_at", "lease_expires_at", "next_attempt_at"):
+            value = values.get(name)
+            values[name] = datetime.fromisoformat(value) if value else None
         return cls(**values)
 
 
@@ -122,6 +138,8 @@ def transition_job(
     checksum_sha256: str | None = None,
     error_code: str | None = None,
     result_objects: Mapping[str, str] | None = None,
+    lease_expires_at: datetime | None = None,
+    next_attempt_at: datetime | None = None,
 ) -> ProcessingJob:
     """Return the next immutable job state; repeated transitions are idempotent."""
 
@@ -136,13 +154,33 @@ def transition_job(
     if target == JobStatus.COMPLETE and not result_objects:
         raise InvalidJobTransition("complete jobs require result objects")
 
+    timestamp = now or utc_now()
+    processing_started_at = job.processing_started_at
+    current_lease = job.lease_expires_at
+    retry_at = job.next_attempt_at
+    if target == JobStatus.PROCESSING:
+        processing_started_at = timestamp
+        current_lease = lease_expires_at or timestamp + timedelta(minutes=5)
+        retry_at = None
+    elif target == JobStatus.QUEUED:
+        processing_started_at = None
+        current_lease = None
+        retry_at = next_attempt_at
+    elif target in {JobStatus.COMPLETE, JobStatus.FAILED}:
+        processing_started_at = None
+        current_lease = None
+        retry_at = None
+
     return replace(
         job,
         status=target,
-        updated_at=now or utc_now(),
+        updated_at=timestamp,
         checksum_sha256=checksum_sha256 or job.checksum_sha256,
         attempt=job.attempt + (1 if target == JobStatus.PROCESSING else 0),
-        error_code=error_code if target == JobStatus.FAILED else None,
+        error_code=error_code if target in {JobStatus.FAILED, JobStatus.QUEUED} else None,
+        processing_started_at=processing_started_at,
+        lease_expires_at=current_lease,
+        next_attempt_at=retry_at,
         result_objects=dict(result_objects or job.result_objects),
         version=job.version + 1,
     )

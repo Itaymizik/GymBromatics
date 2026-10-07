@@ -3,7 +3,7 @@
   const MAX_BYTES=250*1024*1024, TYPES={mp4:'video/mp4',mov:'video/quicktime',webm:'video/webm'};
   const ORDER=['created','uploaded','queued','processing','complete'];
   const STATUS={created:'הסשן נוצר. מעלים את הסרטון…',uploaded:'הסרטון הועלה ונבדק.',queued:'הסרטון ממתין ל־worker המקומי.',processing:'MediaPipe מעבד את הסרטון…',complete:'הניתוח הסתיים בהצלחה.',failed:'עיבוד הסרטון נכשל.'};
-  const ERRORS={invalid_request:'פרטי הקובץ אינם תקינים.',request_too_large:'הקובץ גדול מהמגבלה.',content_type_mismatch:'סוג הקובץ אינו תואם.',upload_size_mismatch:'גודל הקובץ אינו תואם.',checksum_mismatch:'בדיקת תקינות הקובץ נכשלה.',upload_metadata_mismatch:'אימות ההעלאה נכשל.',video_processing_error:'לא ניתן לעבד את הסרטון. בדקו שזהו קובץ וידאו תקין.',required_file_missing:'קובץ הנדרש לעיבוד חסר.',internal_processing_error:'אירעה שגיאה פנימית בעיבוד.'};
+  const ERRORS={invalid_request:'פרטי הקובץ אינם תקינים.',request_too_large:'הקובץ גדול מהמגבלה.',content_type_mismatch:'סוג הקובץ אינו תואם.',upload_size_mismatch:'גודל הקובץ אינו תואם.',checksum_mismatch:'בדיקת תקינות הקובץ נכשלה.',upload_metadata_mismatch:'אימות ההעלאה נכשל.',video_processing_error:'לא ניתן לעבד את הסרטון. בדקו שזהו קובץ וידאו תקין.',processing_timeout:'עיבוד הסרטון חרג ממגבלת הזמן.',required_file_missing:'קובץ הנדרש לעיבוד חסר.',internal_processing_error:'אירעה שגיאה פנימית בעיבוד.'};
   const el=id=>document.getElementById(id), input=el('video-file'), drop=el('drop-zone'), summary=el('file-summary'), start=el('start-upload'), status=el('status'), progress=el('progress'), bar=el('progress-bar'), results=el('results');
   let file=null,polling=false;
   const contentType=value=>TYPES[(value.name.split('.').pop()||'').toLowerCase()]||value.type;
