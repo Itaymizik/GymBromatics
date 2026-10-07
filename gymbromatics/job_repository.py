@@ -32,6 +32,10 @@ class JobRepository(Protocol):
 
     def get(self, session_id: str) -> ProcessingJob: ...
 
+    def list_by_status(
+        self, status: JobStatus, *, limit: int | None = None
+    ) -> list[ProcessingJob]: ...
+
     def transition(
         self,
         session_id: str,
@@ -80,6 +84,22 @@ class LocalJobRepository:
             if not path.is_file():
                 raise JobNotFound(session_id)
             return ProcessingJob.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def list_by_status(
+        self, status: JobStatus, *, limit: int | None = None
+    ) -> list[ProcessingJob]:
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be positive")
+        with self._lock:
+            jobs = [
+                ProcessingJob.from_dict(json.loads(path.read_text(encoding="utf-8")))
+                for path in self.root.glob("*.json")
+            ]
+        matches = sorted(
+            (job for job in jobs if job.status == status),
+            key=lambda job: (job.created_at, job.session_id),
+        )
+        return matches[:limit] if limit is not None else matches
 
     def transition(
         self,

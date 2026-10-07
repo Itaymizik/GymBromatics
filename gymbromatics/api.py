@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .chat import reply
@@ -399,16 +399,57 @@ def create_app(
         response_model=JobStatusResponse,
         tags=["video-processing"],
     )
-    async def video_session_status(session_id: str) -> JobStatusResponse:
+    async def video_session_status(session_id: str, request: Request) -> JobStatusResponse:
         job = get_video_job(session_id)
+        result_urls = {
+            name: str(
+                request.url_for(
+                    "download_video_result", session_id=session_id, result_name=name
+                )
+            )
+            for name in job.result_objects
+        }
         return JobStatusResponse(
             session_id=job.session_id,
             status=job.status,
             attempt=job.attempt,
             error_code=job.error_code,
-            result_urls=dict(job.result_objects),
+            result_urls=result_urls,
             created_at=job.created_at,
             updated_at=job.updated_at,
+        )
+
+    @app.get(
+        "/api/video-sessions/{session_id}/results/{result_name}",
+        tags=["video-processing"],
+        name="download_video_result",
+    )
+    async def download_video_result(
+        session_id: str, result_name: str
+    ) -> StreamingResponse:
+        job = get_video_job(session_id)
+        object_key = job.result_objects.get(result_name)
+        if job.status != JobStatus.COMPLETE or object_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="result_not_found"
+            )
+        stored = runtime.video_storage.inspect(object_key)
+        media_types = {
+            "annotated_video": "video/mp4",
+            "analysis_json": "application/json",
+            "dashboard_html": "text/html; charset=utf-8",
+            "dashboard_json": "application/json",
+        }
+
+        def chunks():
+            with runtime.video_storage.open_reader(object_key) as source:
+                while chunk := source.read(1024 * 1024):
+                    yield chunk
+
+        return StreamingResponse(
+            chunks(),
+            media_type=media_types.get(result_name, stored.content_type),
+            headers={"Content-Length": str(stored.size_bytes)},
         )
 
     @app.post("/api/chat", tags=["chat"], dependencies=[Depends(require_chat_request)], deprecated=True)

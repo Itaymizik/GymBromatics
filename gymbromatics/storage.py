@@ -56,6 +56,8 @@ class VideoStorage(Protocol):
 
     def inspect(self, object_key: str) -> StoredObject: ...
 
+    def open_reader(self, object_key: str) -> BinaryIO: ...
+
     def download(self, object_key: str, destination: Path) -> StoredObject: ...
 
     def store_result(
@@ -189,6 +191,10 @@ class LocalVideoStorage:
         if not path.is_file() or not metadata.is_file():
             raise StorageObjectNotFound(object_key)
         return StoredObject(**json.loads(metadata.read_text(encoding="utf-8")))
+
+    def open_reader(self, object_key: str) -> BinaryIO:
+        self.inspect(object_key)
+        return self._path(object_key).open("rb")
 
     def download(self, object_key: str, destination: Path) -> StoredObject:
         stored = self.inspect(object_key)

@@ -79,5 +79,24 @@ Invoke-RestMethod `
     -Uri "http://127.0.0.1:8765/api/video-sessions/$($created.session_id)"
 ```
 
-The final status is `queued`. At this milestone boundary, that means the upload was
-validated and persisted; the processing worker has not been connected yet.
+After the upload reaches `queued`, run the local worker from another PowerShell
+window:
+
+```powershell
+.\.venv\Scripts\python.exe -m gymbromatics.worker
+```
+
+The command processes all currently queued jobs and exits. To keep a development
+worker running and polling for new uploads:
+
+```powershell
+.\.venv\Scripts\python.exe -m gymbromatics.worker --watch
+```
+
+Poll the status endpoint again after processing. A successful job returns
+`complete` and four `result_urls`: the annotated MP4, raw analysis JSON, portable
+dashboard HTML, and dashboard JSON. Failed jobs return a stable `error_code`
+without exposing an internal stack trace through the API.
+
+The local worker uses `.gymbromatics-local` for job records, objects, and temporary
+work files. This directory is ignored by Git.

@@ -128,3 +128,25 @@ def test_repository_persists_and_rejects_stale_updates(tmp_path) -> None:
             JobStatus.QUEUED,
             expected_version=1,
         )
+
+
+def test_repository_lists_jobs_by_status_in_creation_order(tmp_path) -> None:
+    repository = LocalJobRepository(tmp_path / "jobs")
+    first = new_processing_job(
+        original_filename="first.mp4",
+        content_type="video/mp4",
+        expected_size_bytes=1,
+        input_object_key="first",
+    )
+    second = new_processing_job(
+        original_filename="second.mp4",
+        content_type="video/mp4",
+        expected_size_bytes=1,
+        input_object_key="second",
+        now=first.created_at + timedelta(microseconds=1),
+    )
+    repository.create(first)
+    repository.create(second)
+
+    assert repository.list_by_status(JobStatus.CREATED, limit=1) == [first]
+    assert repository.list_by_status(JobStatus.QUEUED) == []
