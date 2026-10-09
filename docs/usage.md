@@ -92,8 +92,11 @@ local sample video:
 ```
 
 `.github/workflows/ci.yml` runs the Python test suite, validates the Compose file,
-builds both image targets, and smoke-tests the API and worker images. Dependabot
-checks Python and GitHub Actions dependencies weekly.
+builds both image targets, and smoke-tests the API and worker images. On pushes to
+`main`, a separate job also processes `tests/fixtures/squat_e2e.mp4` through the
+real upload, job claiming, MediaPipe, storage, and result-download path. It prints
+container logs on failure and always removes its containers and temporary volume.
+Dependabot checks Python and GitHub Actions dependencies weekly.
 
 Staging deployment (Cloud Run) is described in [infra/README.md](../infra/README.md).
 

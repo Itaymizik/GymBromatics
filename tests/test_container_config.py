@@ -24,3 +24,15 @@ def test_worker_image_contains_dependencies_and_verified_pose_model() -> None:
     assert "sha256sum --check --strict" in dockerfile
     assert "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1" in dockerfile
     assert dockerfile.count("USER gymbromatics") == 2
+
+
+def test_ci_runs_real_compose_flow_on_main_and_always_cleans_up() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "  compose-e2e:\n" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "docker compose up --detach --build --wait" in workflow
+    assert "python scripts/compose_e2e.py tests/fixtures/squat_e2e.mp4" in workflow
+    assert "docker compose logs --no-color" in workflow
+    assert "docker compose down --volumes --remove-orphans" in workflow
+    assert Path("tests/fixtures/squat_e2e.mp4").is_file()
