@@ -51,19 +51,49 @@ lifter with the body visible. Occluded joints may be omitted from the overlay.
 
 ## Docker and CI
 
-Run the same API container used by CI:
+Build and run the API and MediaPipe worker together:
 
 ```powershell
 docker compose up --build --detach
 ```
 
-Then open <http://127.0.0.1:8765>. The container reads `.env.local` at runtime;
-the file is excluded from both Git and the Docker build context.
+Then open <http://127.0.0.1:8765/upload>. Compose starts two non-root containers:
+the API receives uploads and exposes status/results, while the worker claims queued
+jobs and runs MediaPipe. A named volume, `gymbromatics-runtime`, is mounted at
+`/app/.gymbromatics-local` in both containers so job records and artifacts are
+visible to both services and survive container recreation.
 
-`.github/workflows/ci.yml` runs the Python test suite and, independently, builds
-the API image and smoke-tests readiness, the index, API documentation and the
-non-root runtime user. Dependabot checks Python and GitHub Actions dependencies
-weekly.
+The worker image includes the pinned MediaPipe dependencies and the versioned pose
+model. The build verifies the model SHA-256 checksum. The API image retains the
+smaller dependency set. `.env.local` is optional for video processing; when present,
+it is read only by the API at runtime and remains excluded from Git and the build
+context.
+
+To stop the services without deleting processed sessions:
+
+```powershell
+docker compose down
+```
+
+To delete the containers and the local Compose data volume:
+
+```powershell
+docker compose down --volumes
+```
+
+The second command permanently removes uploaded videos and generated results from
+the Compose volume.
+
+With the services running, exercise the complete upload-to-results path using a
+local sample video:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\compose_e2e.py data\squatsample.mp4
+```
+
+`.github/workflows/ci.yml` runs the Python test suite, validates the Compose file,
+builds both image targets, and smoke-tests the API and worker images. Dependabot
+checks Python and GitHub Actions dependencies weekly.
 
 Staging deployment (Cloud Run) is described in [infra/README.md](../infra/README.md).
 

@@ -61,7 +61,14 @@ python -m gymbromatics path/to/squat.mp4 --download-model --dashboard
 
 Then open `outputs/squat_dashboard.html` in a browser. It is a single self-contained file that works offline.
 
-**Or run the server with Docker:** `docker compose up --build` → <http://127.0.0.1:8765>
+**Or run the complete API + worker pipeline with Docker:**
+
+```bash
+docker compose up --build
+```
+
+Then open <http://127.0.0.1:8765/upload>, upload a video, and keep the command
+running while the worker generates the annotated video and dashboard.
 
 > 📹 **Filming tips:** side view (90°), static camera, one lifter, whole body in frame.
 

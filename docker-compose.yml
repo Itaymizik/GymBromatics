@@ -1,15 +1,53 @@
+name: gymbromatics
+
+x-runtime: &runtime
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  volumes:
+    - gymbromatics-runtime:/app/.gymbromatics-local
+
 services:
   api:
+    <<: *runtime
     build:
       context: .
+      target: api
+    image: gymbromatics-api:local
     ports:
       - "8765:8080"
     env_file:
-      - .env.local
+      - path: .env.local
+        required: false
     environment:
       PORT: "8080"
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs:
-      - /tmp
+
+  worker:
+    <<: *runtime
+    build:
+      context: .
+      target: worker
+    image: gymbromatics-worker:local
+    environment:
+      MPLCONFIGDIR: /tmp/matplotlib
+    command:
+      - python
+      - -m
+      - gymbromatics.worker
+      - --watch
+      - --poll-seconds
+      - "1"
+      - --timeout-seconds
+      - "600"
+      - --max-attempts
+      - "3"
+      - --backoff-seconds
+      - "5"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  gymbromatics-runtime:

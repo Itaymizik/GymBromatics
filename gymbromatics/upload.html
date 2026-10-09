@@ -17,6 +17,6 @@
     <div class="progress" id="progress" hidden><div class="bar" id="progress-bar"></div></div><p class="status" id="status" role="status" aria-live="polite">בחרו סרטון כדי להתחיל.</p>
     <div class="steps" aria-label="שלבי העיבוד"><div class="step" data-step="created">הכנת העלאה</div><div class="step" data-step="uploaded">העלאת הסרטון</div><div class="step" data-step="queued">ממתין לעיבוד</div><div class="step" data-step="processing">עיבוד וידאו</div></div>
     <section class="results" id="results" hidden aria-labelledby="results-title"><h2 id="results-title">הניתוח מוכן</h2><div class="result-list" id="result-list"></div></section>
-    <p class="note">בסביבה המקומית יש להפעיל במקביל את ה־worker באמצעות <code>python -m gymbromatics.worker --watch</code>. העיבוד אינו שולח את הסרטון ל־LLM.</p>
+    <p class="note">בהפעלה עם Docker Compose ה־worker עולה אוטומטית. בהפעלה ישירה יש להריץ במקביל <code>python -m gymbromatics.worker --watch</code>. העיבוד אינו שולח את הסרטון ל־LLM.</p>
   </section>
 </main><script src="/assets/upload.js" defer></script></body></html>

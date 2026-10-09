@@ -31,15 +31,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
       - name: Build API image
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: api
           load: true
           push: false
           tags: gymbromatics:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          load: true
+          push: false
+          tags: gymbromatics-worker:ci
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
       - name: Smoke test container
         shell: bash
         run: |
@@ -48,7 +61,9 @@ jobs:
             --env GEMINI_API_KEY=ci-placeholder \
             --env GEMINI_FREE_TIER_CONFIRMED=true \
             gymbromatics:ci
-          trap 'docker stop gymbromatics-ci' EXIT
+          docker run --detach --rm --name gymbromatics-worker-ci \
+            gymbromatics-worker:ci
+          trap 'docker stop gymbromatics-ci gymbromatics-worker-ci' EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:8080/health/ready > /tmp/ready.json; then
               break
@@ -59,4 +74,12 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/)" = 200
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/docs)" = 200
           test "$(docker image inspect gymbromatics:ci --format '{{.Config.User}}')" = gymbromatics
+          test "$(docker image inspect gymbromatics-worker:ci --format '{{.Config.User}}')" = gymbromatics
+          for attempt in {1..30}; do
+            if [ "$(docker inspect gymbromatics-worker-ci --format '{{.State.Health.Status}}')" = healthy ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(docker inspect gymbromatics-worker-ci --format '{{.State.Health.Status}}')" = healthy
           ! docker image inspect gymbromatics:ci | grep --fixed-strings ci-placeholder

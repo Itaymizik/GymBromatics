@@ -103,6 +103,18 @@ work files. This directory is ignored by Git.
 
 ## Try the browser upload UI
 
+The simplest local setup starts both processes with one command:
+
+```powershell
+docker compose up --build
+```
+
+Compose gives the API and worker a shared named volume and waits for the API health
+check before starting the worker. Open `http://127.0.0.1:8765/upload`. The worker
+image contains MediaPipe, FFmpeg, and a checksum-verified pose model.
+
+The two-window commands below remain useful when developing without containers.
+
 Run the API and worker in separate PowerShell windows:
 
 ```powershell
