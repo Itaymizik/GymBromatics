@@ -1,25 +1,89 @@
-# Architecture and data contract
+# System architecture and data contract
 
 [← Back to README](../README.md)
 
-## Modules
+## System overview
+
+```mermaid
+flowchart LR
+    Browser[Browser] -->|create session / upload / poll| API[FastAPI API]
+    API --> Jobs[(JobRepository)]
+    API --> Storage[(VideoStorage)]
+    Worker[Background worker] -->|atomic claim / status| Jobs
+    Worker -->|read input / write results| Storage
+    Worker --> CV[Squat CV pipeline]
+    CV --> Worker
+    Storage -->|video, JSON, dashboard| Browser
+```
+
+`api.py` owns the HTTP boundary: it validates session requests, receives local
+uploads, queues work, exposes status, and serves completed artifacts. It does not
+run MediaPipe. `worker.py` runs as a separate process, atomically claims queued
+jobs, downloads their video, executes the CV pipeline, stores the generated files,
+and records either completion or a controlled retry/failure.
+
+Persistence is hidden behind the `JobRepository` and `VideoStorage` protocols.
+The current local adapters use JSON records and files under one shared directory.
+Docker Compose mounts that directory as a named volume in both containers, so the
+API and worker share durable state without being coupled to each other's process.
+The interfaces are the replacement points for a database, queue, and cloud object
+storage in a later deployment.
+
+## Job lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> created
+    created --> uploaded: upload verified
+    uploaded --> queued: processing requested
+    queued --> processing: atomic worker claim + lease
+    processing --> complete: artifacts stored
+    processing --> queued: retry with backoff
+    created --> failed
+    uploaded --> failed
+    queued --> failed
+    processing --> failed: attempts exhausted / permanent error
+```
+
+`jobs.py` defines this state machine and immutable `ProcessingJob` records. The
+repository uses a file lock, atomic replacement, and record versions to prevent
+two workers from claiming or overwriting the same job. A processing lease and
+timeout let another worker recover abandoned work; transient errors return to
+`queued` with backoff until the attempt limit is reached.
+
+## Application and infrastructure modules
+
+- `api.py`: FastAPI routes for sessions, uploads, status, results, health and chat.
+- `jobs.py`: processing-job model, valid transitions, attempts and leases.
+- `job_repository.py`: `JobRepository` protocol and atomic local JSON adapter.
+- `storage.py`: `VideoStorage` protocol and local filesystem adapter.
+- `worker.py`: queue polling, atomic claim, timeout, retry and pipeline execution.
+- `docker-compose.yml`: separate API and worker containers with a shared named volume.
+- `chat.py` / `chat_server.py` / `chat_ui.js`: session-aware Hebrew chat over computed evidence.
+
+## Computer-vision pipeline
+
+```text
+video → extractor → filter → squat logic → repetitions / technique / comparisons
+      → visualizer + JSON → dashboard → optional LLM feedback
+```
 
 - `state.py`: provider-independent `Landmark` and `FrameState` dataclasses.
 - `extractor.py`: `PoseExtractor` interface and the MediaPipe video adapter.
-- `visualizer.py`: OpenCV drawing from named landmarks, without MediaPipe types.
-- `squat_logic.py`: bilateral 2D joint angles, confidence gating and stable display-side selection.
-- `pipeline.py`: video I/O, timestamps, JSON streaming and resource cleanup.
-- `model.py`: optional model download and local cache.
 - `filter.py`: gap-aware trajectory smoothing and vertical velocity calculation.
-- `dashboard.py` / `dashboard.html` / `dashboard.js`: portable interactive video/velocity/angle report.
+- `squat_logic.py`: bilateral 2D joint angles, confidence gating and display-side selection.
 - `repetitions.py`: automatic squat-cycle proposals from the hip trajectory.
-- `technique.py` / `technique.js` / `technique_ui.js` / `calibration.js`: geometry-based technique notes and height calibration.
-- `comparisons.py` / `comparisons.js`: per-repetition comparisons (Python/JavaScript parity).
-- `feedback.py` / `feedback_provider.py`: optional Gemini feedback sidecar.
-- `api.py` / `chat.py` / `chat_server.py` / `chat_ui.js`: FastAPI server and session chat.
+- `technique.py`: geometry-based technique rules and height calibration.
+- `comparisons.py`: per-repetition comparisons.
+- `visualizer.py`: OpenCV overlays using named landmarks, without MediaPipe types.
+- `pipeline.py`: video I/O, timestamps, JSON streaming and resource cleanup.
+- `dashboard.py`: portable interactive video, velocity, angle and repetition report.
+- `feedback.py` / `feedback_provider.py`: optional Gemini feedback from computed evidence.
 
 The pose layer is isolated behind `PoseExtractor`, so MediaPipe can be replaced
-(e.g. by YOLO-Pose) without changing the kinematics modules.
+by another provider without changing the kinematics engine. The application layer
+depends on the storage and repository protocols, so infrastructure can likewise
+change without rewriting the CV pipeline.
 
 ## Landmark data contract
 

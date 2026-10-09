@@ -74,6 +74,25 @@ running while the worker generates the annotated video and dashboard.
 
 ## 🧠 How it works
 
+The upload and processing path runs as two independent services:
+
+```mermaid
+flowchart LR
+    Browser -->|upload + status| API[FastAPI API]
+    API --> Jobs[(Job Repository)]
+    API --> Storage[(Video Storage)]
+    Worker -->|atomic job claim| Jobs
+    Worker -->|input + artifacts| Storage
+    Worker --> CV[CV pipeline]
+    Storage -->|annotated video, JSON, dashboard| Browser
+```
+
+Docker Compose starts the API and worker together and gives them a shared local
+volume. `JobRepository` and `VideoStorage` are interfaces, keeping the processing
+code independent from the local filesystem and ready for later cloud adapters.
+
+Inside the worker, the computer-vision pipeline is:
+
 ```
  video ──► extractor.py ──► filter.py ──► squat_logic.py ──► visualizer.py ──► annotated MP4
           (MediaPipe pose)  (smoothing,   repetitions.py     dashboard.py  ──► interactive HTML
@@ -87,7 +106,7 @@ The pose layer sits behind a provider-independent `PoseExtractor` interface, so 
 | Topic | |
 |---|---|
 | [Usage & CLI](docs/usage.md) | Setup, options, outputs, Docker, CI |
-| [Architecture](docs/architecture.md) | Modules and landmark data contract |
+| [Architecture](docs/architecture.md) | API, worker, job lifecycle, storage and CV modules |
 | [Joint angles](docs/joint-angles.md) | Angle definitions and JSON schema v3 |
 | [Dashboard](docs/dashboard.md) | Velocity profile, rep detection and editing |
 | [Technique rules](docs/technique-rules.md) | Depth / coordination / heel-lift rules, height calibration |
