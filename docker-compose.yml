@@ -30,6 +30,9 @@ services:
       context: .
       target: worker
     image: gymbromatics-worker:local
+    env_file:
+      - path: .env.local
+        required: false
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
     command:

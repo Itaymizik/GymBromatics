@@ -1,0 +1,16 @@
+[
+  {
+    "origin": [
+      "http://127.0.0.1:8765",
+      "http://localhost:8765",
+      "https://gymbromatics-staging-314205128886.me-west1.run.app"
+    ],
+    "method": ["PUT"],
+    "responseHeader": [
+      "Content-Type",
+      "x-goog-if-generation-match",
+      "x-goog-meta-sha256"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

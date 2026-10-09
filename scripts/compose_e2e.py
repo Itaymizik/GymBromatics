@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -28,7 +29,8 @@ def request_json(
     )
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = response.read()
+            return json.loads(payload.decode("utf-8")) if payload else {}
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"{method} {url} returned {error.code}: {detail}") from error
@@ -58,6 +60,7 @@ def main() -> None:
     wait_until_ready(args.base_url, deadline)
 
     video_bytes = args.video.read_bytes()
+    checksum_sha256 = hashlib.sha256(video_bytes).hexdigest()
     created = request_json(
         f"{args.base_url}/api/video-sessions",
         method="POST",
@@ -65,9 +68,10 @@ def main() -> None:
             "filename": args.video.name,
             "content_type": "video/mp4",
             "size_bytes": len(video_bytes),
+            "checksum_sha256": checksum_sha256,
         },
     )
-    receipt = request_json(
+    request_json(
         created["upload"]["url"],
         method="PUT",
         body=video_bytes,
@@ -78,8 +82,8 @@ def main() -> None:
         f"{args.base_url}/api/video-sessions/{created['session_id']}/upload-complete",
         method="POST",
         body={
-            "size_bytes": receipt["size_bytes"],
-            "checksum_sha256": receipt["checksum_sha256"],
+            "size_bytes": len(video_bytes),
+            "checksum_sha256": checksum_sha256,
         },
     )
 

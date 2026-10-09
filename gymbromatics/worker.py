@@ -19,7 +19,7 @@ from .jobs import JobStatus, ProcessingJob, utc_now
 from .model import DEFAULT_MODEL
 from .pipeline import process_video
 from .squat_logic import SquatKinematics
-from .storage import LocalVideoStorage, VideoStorage
+from .storage import VideoStorage, video_storage_from_env
 from .visualizer import AngleVisualizer
 
 logger = logging.getLogger(__name__)
@@ -310,7 +310,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     worker = LocalJobWorker(
         LocalJobRepository(args.runtime_root / "jobs"),
-        LocalVideoStorage(args.runtime_root / "objects"),
+        video_storage_from_env(args.runtime_root / "objects"),
         MediaPipeVideoJobProcessor(args.model, args.confidence),
         workspace=args.runtime_root / "work",
         timeout_seconds=args.timeout_seconds,

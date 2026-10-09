@@ -23,11 +23,11 @@ jobs, downloads their video, executes the CV pipeline, stores the generated file
 and records either completion or a controlled retry/failure.
 
 Persistence is hidden behind the `JobRepository` and `VideoStorage` protocols.
-The current local adapters use JSON records and files under one shared directory.
-Docker Compose mounts that directory as a named volume in both containers, so the
-API and worker share durable state without being coupled to each other's process.
-The interfaces are the replacement points for a database, queue, and cloud object
-storage in a later deployment.
+The local adapters use JSON records and files under one shared directory. Docker
+Compose mounts that directory as a named volume in both containers. In a cloud
+environment, `GCSVideoStorage` replaces the file adapter and gives the browser a
+short-lived V4 Signed URL, so large video bytes bypass FastAPI. `JobRepository`
+remains the replacement point for a managed database or queue.
 
 ## Job lifecycle
 
@@ -56,7 +56,7 @@ timeout let another worker recover abandoned work; transient errors return to
 - `api.py`: FastAPI routes for sessions, uploads, status, results, health and chat.
 - `jobs.py`: processing-job model, valid transitions, attempts and leases.
 - `job_repository.py`: `JobRepository` protocol and atomic local JSON adapter.
-- `storage.py`: `VideoStorage` protocol and local filesystem adapter.
+- `storage.py`: `VideoStorage` protocol plus local filesystem and GCS adapters.
 - `worker.py`: queue polling, atomic claim, timeout, retry and pipeline execution.
 - `docker-compose.yml`: separate API and worker containers with a shared named volume.
 - `chat.py` / `chat_server.py` / `chat_ui.js`: session-aware Hebrew chat over computed evidence.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from gymbromatics.api import create_app
 from gymbromatics.job_repository import LocalJobRepository
-from gymbromatics.storage import LocalVideoStorage
+from gymbromatics.storage import LocalVideoStorage, StoredObject, UploadTarget
 
 
 class Provider:
@@ -150,3 +151,67 @@ def test_unknown_video_session_is_404(upload_api) -> None:
     response = client.get("/api/video-sessions/00000000-0000-0000-0000-000000000099")
     assert response.status_code == 404
     assert response.json() == {"error": "video_session_not_found"}
+
+
+class SignedUploadStorage:
+    def __init__(self) -> None:
+        self.checksum: str | None = None
+        self.object_key = "sessions/signed/input/video.mp4"
+
+    def create_upload_target(self, session_id, **options):
+        self.checksum = options["checksum_sha256"]
+        self.object_key = f"sessions/{session_id}/input/video.mp4"
+        return UploadTarget(
+            object_key=self.object_key,
+            url="https://storage.googleapis.test/signed-upload",
+            method="PUT",
+            headers={
+                "Content-Type": options["content_type"],
+                "x-goog-meta-sha256": self.checksum,
+            },
+            expires_at=datetime.now(timezone.utc),
+        )
+
+    def inspect(self, object_key):
+        assert object_key == self.object_key
+        return StoredObject(object_key, 5, self.checksum, "video/mp4")
+
+    def open_reader(self, object_key):  # pragma: no cover - unused
+        raise AssertionError
+
+    def download(self, object_key, destination):  # pragma: no cover - unused
+        raise AssertionError
+
+    def store_result(self, session_id, *, name, source, content_type):  # pragma: no cover
+        raise AssertionError
+
+    def delete_session(self, session_id):  # pragma: no cover - unused
+        return None
+
+
+def test_api_returns_provider_signed_upload_url(tmp_path) -> None:
+    repository = LocalJobRepository(tmp_path / "jobs")
+    storage = SignedUploadStorage()
+    app = create_app(
+        [Path("demo_artifacts/squatsample_dashboard.html")],
+        Provider(),
+        video_storage=storage,
+        job_repository=repository,
+    )
+    checksum = hashlib.sha256(b"video").hexdigest()
+    with TestClient(app, base_url="https://api.test") as client:
+        created = create_session(client, b"video")
+        assert created["upload"]["url"] == "https://storage.googleapis.test/signed-upload"
+        assert created["upload"]["headers"]["x-goog-meta-sha256"] == checksum
+        local_upload = client.put(
+            f"/api/video-sessions/{created['session_id']}/upload",
+            content=b"video",
+            headers={"Content-Type": "video/mp4"},
+        )
+        assert local_upload.status_code == 404
+        confirmed = client.post(
+            f"/api/video-sessions/{created['session_id']}/upload-complete",
+            json={"size_bytes": 5, "checksum_sha256": checksum},
+        )
+    assert confirmed.status_code == 200
+    assert repository.get(created["session_id"]).status.value == "queued"

@@ -25,10 +25,12 @@ from .job_repository import JobNotFound, JobRepository, LocalJobRepository
 from .jobs import JobStatus, ProcessingJob, new_processing_job
 from .storage import (
     ChecksumMismatch,
+    ChecksumRequired,
     LocalUploadStorage,
-    LocalVideoStorage,
     StorageObjectNotFound,
     UploadTooLarge,
+    VideoStorage,
+    video_storage_from_env,
 )
 from .upload_contract import (
     ConfirmUploadRequest,
@@ -93,7 +95,7 @@ class ApplicationState:
         self,
         dashboard_paths: list[Path],
         provider: FeedbackProvider | None = None,
-        video_storage: LocalUploadStorage | None = None,
+        video_storage: VideoStorage | None = None,
         job_repository: JobRepository | None = None,
     ) -> None:
         self.sessions: dict[str, dict[str, Any]] = {}
@@ -110,7 +112,9 @@ class ApplicationState:
                 raise ValueError(f"Duplicate analysis_id: {analysis_id}")
             self.sessions[analysis_id] = {"data": data, "path": html_path}
         self.provider = provider or GeminiFreeTier.from_env()
-        self.video_storage = video_storage or LocalVideoStorage(LOCAL_RUNTIME_ROOT / "objects")
+        self.video_storage = video_storage or video_storage_from_env(
+            LOCAL_RUNTIME_ROOT / "objects"
+        )
         self.job_repository = job_repository or LocalJobRepository(LOCAL_RUNTIME_ROOT / "jobs")
         self.page_token = secrets.token_urlsafe(32)
         self.conversations: dict[str, ConversationState] = {}
@@ -132,7 +136,7 @@ def _same_origin(request: Request) -> str:
 def create_app(
     dashboard_paths: list[Path] | None = None,
     provider: FeedbackProvider | None = None,
-    video_storage: LocalUploadStorage | None = None,
+    video_storage: VideoStorage | None = None,
     job_repository: JobRepository | None = None,
 ) -> FastAPI:
     """Application factory keeps configuration explicit and tests isolated."""
@@ -274,12 +278,19 @@ def create_app(
         body: CreateVideoSessionRequest, request: Request
     ) -> CreateVideoSessionResponse:
         session_id = str(uuid4())
-        target = runtime.video_storage.create_upload_target(
-            session_id,
-            filename=body.filename,
-            content_type=body.content_type,
-            expires_in=timedelta(minutes=15),
-        )
+        try:
+            target = runtime.video_storage.create_upload_target(
+                session_id,
+                filename=body.filename,
+                content_type=body.content_type,
+                expires_in=timedelta(minutes=15),
+                checksum_sha256=body.checksum_sha256,
+            )
+        except ChecksumRequired:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="checksum_required",
+            ) from None
         job = new_processing_job(
             session_id=session_id,
             original_filename=body.filename,
@@ -289,12 +300,17 @@ def create_app(
             declared_checksum_sha256=body.checksum_sha256,
         )
         runtime.job_repository.create(job)
-        upload_url = str(request.url_for("upload_local_video", session_id=session_id))
+        upload_url = target.url
+        if isinstance(runtime.video_storage, LocalUploadStorage):
+            upload_url = str(
+                request.url_for("upload_local_video", session_id=session_id)
+            )
         return CreateVideoSessionResponse(
             session_id=session_id,
             status=JobStatus.CREATED,
             upload=UploadInstruction(
                 url=upload_url,
+                method=target.method,
                 headers=target.headers,
                 expires_at=target.expires_at,
             ),
@@ -308,6 +324,11 @@ def create_app(
     async def upload_local_video(
         session_id: str, request: Request
     ) -> UploadReceiptResponse:
+        if not isinstance(runtime.video_storage, LocalUploadStorage):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="local_upload_unavailable",
+            )
         job = get_video_job(session_id)
         if job.status != JobStatus.CREATED:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="upload_closed")
@@ -375,6 +396,11 @@ def create_app(
             except StorageObjectNotFound:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT, detail="upload_not_found"
+                ) from None
+            except ChecksumMismatch:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="upload_metadata_mismatch",
                 ) from None
             if (
                 stored.size_bytes != body.size_bytes
