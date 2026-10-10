@@ -59,3 +59,11 @@ bucket must be retained.
 Creating a bucket, storing videos, API operations, and network egress can incur
 Google Cloud charges. The repository does not create or configure these cloud
 resources automatically.
+
+## PostgreSQL job repository
+
+The application supports PostgreSQL through `DATABASE_URL`, but this repository
+does not provision Cloud SQL or another managed database. The current staging
+service must be explicitly reconfigured before it can use this adapter. Creating
+a managed PostgreSQL instance can incur ongoing charges even when application
+traffic is low; review its minimum-instance and storage pricing before enabling it.

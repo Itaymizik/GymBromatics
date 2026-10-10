@@ -143,11 +143,14 @@ The browser computes SHA-256 before creating the session. With local storage it
 uploads through FastAPI; with GCS it automatically uses the returned Signed URL
 and sends the signed checksum and create-only headers.
 
-## Local worker reliability
+## Job repository reliability
 
-The local repository uses an operating-system file lock around each read-modify-write
-operation. `claim_next_queued` selects and moves one eligible job to `processing`
-inside the same lock, so two local worker processes cannot claim the same job.
+Docker Compose and deployments configured with `DATABASE_URL` use PostgreSQL.
+`claim_next_queued` uses `FOR UPDATE SKIP LOCKED` and changes the selected job to
+`processing` in the same transaction, so concurrent workers cannot claim one job.
+Schema changes are applied from versioned SQL migrations at startup. Direct local
+runs without `DATABASE_URL` retain the JSON repository, which uses an operating-system
+file lock around each read-modify-write operation and provides the same contract.
 
 Each claim records an attempt number and a lease expiry. Processing runs in a child
 process; the parent terminates that process when the configured timeout expires.

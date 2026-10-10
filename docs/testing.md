@@ -19,6 +19,21 @@ The opt-in integration test processes `data/squatsample.mp4` using the local
 model. Other tests cover missing landmarks, confidence gating, video/JSON
 alignment, invalid input and protection against overwriting the source.
 
+## PostgreSQL repository integration
+
+Start the local database and run the repository tests against it:
+
+```powershell
+docker compose up --detach --wait postgres
+$env:TEST_DATABASE_URL = 'postgresql://gymbromatics:gymbromatics-local@127.0.0.1:55432/gymbromatics'
+.\.venv\Scripts\python.exe -m pytest tests/test_postgres_repository.py -q
+Remove-Item Env:TEST_DATABASE_URL
+```
+
+The test suite applies versioned migrations and then verifies lifecycle updates,
+retry eligibility, and atomic claiming across independent repository instances.
+CI runs the same tests against an isolated PostgreSQL service container.
+
 ## Browser acceptance tests (opt-in)
 
 Verify graph clicking, video decoding, time/angle synchronization, keyboard

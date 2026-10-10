@@ -51,17 +51,17 @@ lifter with the body visible. Occluded joints may be omitted from the overlay.
 
 ## Docker and CI
 
-Build and run the API and MediaPipe worker together:
+Build and run PostgreSQL, the API, and the MediaPipe worker together:
 
 ```powershell
 docker compose up --build --detach
 ```
 
-Then open <http://127.0.0.1:8765/upload>. Compose starts two non-root containers:
-the API receives uploads and exposes status/results, while the worker claims queued
-jobs and runs MediaPipe. A named volume, `gymbromatics-runtime`, is mounted at
-`/app/.gymbromatics-local` in both containers so job records and artifacts are
-visible to both services and survive container recreation.
+Then open <http://127.0.0.1:8765/upload>. The API receives uploads and exposes
+status/results, PostgreSQL stores the shared job state, and the worker atomically
+claims queued jobs and runs MediaPipe. The database is exposed only on localhost
+port `55432` for development. Named volumes preserve the database and artifacts
+across container recreation.
 
 The worker image includes the pinned MediaPipe dependencies and the versioned pose
 model. The build verifies the model SHA-256 checksum. The API image retains the
@@ -81,8 +81,8 @@ To delete the containers and the local Compose data volume:
 docker compose down --volumes
 ```
 
-The second command permanently removes uploaded videos and generated results from
-the Compose volume.
+The second command permanently removes uploaded videos, generated results, and the
+local PostgreSQL database from the Compose volumes.
 
 With the services running, exercise the complete upload-to-results path using a
 local sample video:

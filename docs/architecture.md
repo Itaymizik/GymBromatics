@@ -7,7 +7,7 @@
 ```mermaid
 flowchart LR
     Browser[Browser] -->|create session / upload / poll| API[FastAPI API]
-    API --> Jobs[(JobRepository)]
+    API --> Jobs[(PostgreSQL\nJobRepository)]
     API --> Storage[(VideoStorage)]
     Worker[Background worker] -->|atomic claim / status| Jobs
     Worker -->|read input / write results| Storage
@@ -23,11 +23,11 @@ jobs, downloads their video, executes the CV pipeline, stores the generated file
 and records either completion or a controlled retry/failure.
 
 Persistence is hidden behind the `JobRepository` and `VideoStorage` protocols.
-The local adapters use JSON records and files under one shared directory. Docker
-Compose mounts that directory as a named volume in both containers. In a cloud
-environment, `GCSVideoStorage` replaces the file adapter and gives the browser a
-short-lived V4 Signed URL, so large video bytes bypass FastAPI. `JobRepository`
-remains the replacement point for a managed database or queue.
+Direct Python runs fall back to a locked JSON repository and local files. Docker
+Compose uses PostgreSQL as the shared job repository and a named volume for video
+artifacts. In a cloud environment, `GCSVideoStorage` replaces the file adapter and
+gives the browser a short-lived V4 Signed URL, so large video bytes bypass FastAPI.
+The repository interface keeps a future managed PostgreSQL service replaceable.
 
 ## Job lifecycle
 
@@ -45,20 +45,22 @@ stateDiagram-v2
     processing --> failed: attempts exhausted / permanent error
 ```
 
-`jobs.py` defines this state machine and immutable `ProcessingJob` records. The
-repository uses a file lock, atomic replacement, and record versions to prevent
-two workers from claiming or overwriting the same job. A processing lease and
-timeout let another worker recover abandoned work; transient errors return to
-`queued` with backoff until the attempt limit is reached.
+`jobs.py` defines this state machine and immutable `ProcessingJob` records.
+PostgreSQL claims one eligible row with `FOR UPDATE SKIP LOCKED`, updates it in the
+same transaction, and uses record versions for optimistic concurrency. The local
+fallback provides the same behavior with a file lock and atomic replacement. A
+processing lease and timeout let another worker recover abandoned work; transient
+errors return to `queued` with backoff until the attempt limit is reached.
 
 ## Application and infrastructure modules
 
 - `api.py`: FastAPI routes for sessions, uploads, status, results, health and chat.
 - `jobs.py`: processing-job model, valid transitions, attempts and leases.
-- `job_repository.py`: `JobRepository` protocol and atomic local JSON adapter.
+- `job_repository.py`: `JobRepository` protocol, environment factory, and local JSON adapter.
+- `postgres_repository.py`: pooled PostgreSQL adapter, migrations, atomic claims, and optimistic updates.
 - `storage.py`: `VideoStorage` protocol plus local filesystem and GCS adapters.
 - `worker.py`: queue polling, atomic claim, timeout, retry and pipeline execution.
-- `docker-compose.yml`: separate API and worker containers with a shared named volume.
+- `docker-compose.yml`: PostgreSQL, separate API/worker containers, and a shared artifact volume.
 - `chat.py` / `chat_server.py` / `chat_ui.js`: session-aware Hebrew chat over computed evidence.
 
 ## Computer-vision pipeline

@@ -87,9 +87,10 @@ flowchart LR
     Storage -->|annotated video, JSON, dashboard| Browser
 ```
 
-Docker Compose starts the API and worker together and gives them a shared local
-volume. `JobRepository` and `VideoStorage` are interfaces, keeping the processing
-code independent from the local filesystem and ready for later cloud adapters.
+Docker Compose starts PostgreSQL, the API, and the worker together. PostgreSQL is
+the shared durable job repository; a named volume stores uploaded videos and
+generated artifacts. `JobRepository` and `VideoStorage` remain interfaces, keeping
+the application independent from a specific database or object store.
 
 Inside the worker, the computer-vision pipeline is:
 

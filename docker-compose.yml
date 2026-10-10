@@ -10,6 +10,23 @@ x-runtime: &runtime
     - gymbromatics-runtime:/app/.gymbromatics-local
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      POSTGRES_DB: gymbromatics
+      POSTGRES_USER: gymbromatics
+      POSTGRES_PASSWORD: gymbromatics-local
+    volumes:
+      - gymbromatics-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gymbromatics -d gymbromatics"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     <<: *runtime
     build:
@@ -23,6 +40,10 @@ services:
         required: false
     environment:
       PORT: "8080"
+      DATABASE_URL: postgresql://gymbromatics:gymbromatics-local@postgres:5432/gymbromatics
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   worker:
     <<: *runtime
@@ -35,6 +56,7 @@ services:
         required: false
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
+      DATABASE_URL: postgresql://gymbromatics:gymbromatics-local@postgres:5432/gymbromatics
     command:
       - python
       - -m
@@ -54,3 +76,4 @@ services:
 
 volumes:
   gymbromatics-runtime:
+  gymbromatics-postgres:

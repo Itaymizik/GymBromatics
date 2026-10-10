@@ -205,3 +205,24 @@ class LocalJobRepository:
             if updated is not current:
                 self._write(path, updated)
             return updated
+
+    def healthcheck(self) -> bool:
+        return self.root.is_dir()
+
+    def close(self) -> None:
+        return None
+
+
+def job_repository_from_env(local_root: Path) -> JobRepository:
+    """Use PostgreSQL when DATABASE_URL is set, otherwise local JSON files."""
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        return LocalJobRepository(local_root)
+    from .postgres_repository import PostgresJobRepository
+
+    return PostgresJobRepository(
+        database_url,
+        min_size=int(os.getenv("DATABASE_POOL_MIN", "1")),
+        max_size=int(os.getenv("DATABASE_POOL_MAX", "5")),
+    )

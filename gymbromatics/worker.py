@@ -14,7 +14,7 @@ from typing import Mapping, Protocol
 
 from .dashboard import export_dashboard
 from .extractor import MediaPipePoseExtractor
-from .job_repository import ConcurrentJobUpdate, JobRepository, LocalJobRepository
+from .job_repository import ConcurrentJobUpdate, JobRepository, job_repository_from_env
 from .jobs import JobStatus, ProcessingJob, utc_now
 from .model import DEFAULT_MODEL
 from .pipeline import process_video
@@ -308,8 +308,9 @@ def main() -> None:
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    repository = job_repository_from_env(args.runtime_root / "jobs")
     worker = LocalJobWorker(
-        LocalJobRepository(args.runtime_root / "jobs"),
+        repository,
         video_storage_from_env(args.runtime_root / "objects"),
         MediaPipeVideoJobProcessor(args.model, args.confidence),
         workspace=args.runtime_root / "work",
@@ -317,13 +318,18 @@ def main() -> None:
         max_attempts=args.max_attempts,
         backoff_seconds=args.backoff_seconds,
     )
-    while True:
-        results = worker.run_pending()
-        if not args.watch:
-            print(f"Processed {len(results)} queued job(s).")
-            return
-        if not results:
-            time.sleep(args.poll_seconds)
+    try:
+        while True:
+            results = worker.run_pending()
+            if not args.watch:
+                print(f"Processed {len(results)} queued job(s).")
+                return
+            if not results:
+                time.sleep(args.poll_seconds)
+    finally:
+        close = getattr(repository, "close", None)
+        if callable(close):
+            close()
 
 
 if __name__ == "__main__":

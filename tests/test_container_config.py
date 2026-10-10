@@ -12,6 +12,10 @@ def test_compose_runs_api_and_worker_with_shared_runtime_volume() -> None:
     assert "condition: service_healthy" in compose
     assert "gymbromatics.worker" in compose
     assert '"8765:8080"' in compose
+    assert "  postgres:\n" in compose
+    assert "postgres:17-alpine" in compose
+    assert '"127.0.0.1:55432:5432"' in compose
+    assert compose.count("DATABASE_URL: postgresql://gymbromatics:") == 2
 
 
 def test_worker_image_contains_dependencies_and_verified_pose_model() -> None:

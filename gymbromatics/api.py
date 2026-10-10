@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .chat import reply
 from .feedback_provider import FeedbackError, FeedbackProvider, GeminiFreeTier
-from .job_repository import JobNotFound, JobRepository, LocalJobRepository
+from .job_repository import JobNotFound, JobRepository, job_repository_from_env
 from .jobs import JobStatus, ProcessingJob, new_processing_job
 from .storage import (
     ChecksumMismatch,
@@ -115,7 +115,9 @@ class ApplicationState:
         self.video_storage = video_storage or video_storage_from_env(
             LOCAL_RUNTIME_ROOT / "objects"
         )
-        self.job_repository = job_repository or LocalJobRepository(LOCAL_RUNTIME_ROOT / "jobs")
+        self.job_repository = job_repository or job_repository_from_env(
+            LOCAL_RUNTIME_ROOT / "jobs"
+        )
         self.page_token = secrets.token_urlsafe(32)
         self.conversations: dict[str, ConversationState] = {}
         self.state_lock = threading.Lock()
@@ -125,8 +127,19 @@ class ApplicationState:
         provider_configured = not isinstance(self.provider, GeminiFreeTier) or (
             bool(self.provider.api_key) and self.provider.free_tier_confirmed
         )
-        checks = {"sessions_loaded": bool(self.sessions), "llm_configured": provider_configured}
+        healthcheck = getattr(self.job_repository, "healthcheck", None)
+        repository_ready = healthcheck() if callable(healthcheck) else True
+        checks = {
+            "sessions_loaded": bool(self.sessions),
+            "llm_configured": provider_configured,
+            "job_repository": repository_ready,
+        }
         return all(checks.values()), checks
+
+    def close(self) -> None:
+        close = getattr(self.job_repository, "close", None)
+        if callable(close):
+            close()
 
 
 def _same_origin(request: Request) -> str:
@@ -153,6 +166,7 @@ def create_app(
         description="Side-view squat session dashboards and evidence-grounded chat.",
     )
     app.state.runtime = runtime
+    app.add_event_handler("shutdown", runtime.close)
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, error: HTTPException) -> JSONResponse:
