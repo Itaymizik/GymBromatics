@@ -36,7 +36,7 @@ class CreateVideoSessionRequest(StrictModel):
             or "\\" in value
             or "\x00" in value
         ):
-            raise ValueError("filename must not contain a path")
+            raise ValueError("filename must not be blank or contain a path")
         return value
 
 
