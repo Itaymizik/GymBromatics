@@ -29,7 +29,13 @@ class CreateVideoSessionRequest(StrictModel):
     @field_validator("filename")
     @classmethod
     def plain_filename(cls, value: str) -> str:
-        if value in {".", ".."} or "/" in value or "\\" in value or "\x00" in value:
+        if (
+            not value.strip()
+            or value in {".", ".."}
+            or "/" in value
+            or "\\" in value
+            or "\x00" in value
+        ):
             raise ValueError("filename must not contain a path")
         return value
 

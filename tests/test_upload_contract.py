@@ -39,6 +39,8 @@ def test_create_session_contract_accepts_supported_video() -> None:
         {"filename": "../squat.mp4", "content_type": "video/mp4", "size_bytes": 1},
         {"filename": "squat.avi", "content_type": "video/avi", "size_bytes": 1},
         {"filename": "squat.mp4", "content_type": "video/mp4", "size_bytes": 0},
+        {"filename": "   ", "content_type": "video/mp4", 
+         "size_bytes": 1},
         {
             "filename": "squat.mp4",
             "content_type": "video/mp4",
