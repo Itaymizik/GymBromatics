@@ -39,6 +39,13 @@ class CreateVideoSessionRequest(StrictModel):
             raise ValueError("filename must not be blank or contain a path")
         return value
 
+    @field_validator("checksum_sha256")
+    @classmethod
+    def normalize_checksum(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.lower()
+
 
 class UploadInstruction(StrictModel):
     url: str
@@ -56,6 +63,11 @@ class CreateVideoSessionResponse(StrictModel):
 class ConfirmUploadRequest(StrictModel):
     size_bytes: int = Field(gt=0, le=MAX_VIDEO_BYTES)
     checksum_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+
+    @field_validator("checksum_sha256")
+    @classmethod
+    def normalize_checksum(cls, value: str) -> str:
+        return value.lower()
 
 
 class UploadReceiptResponse(StrictModel):

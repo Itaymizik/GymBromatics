@@ -9,6 +9,7 @@ from gymbromatics.upload_contract import (
     CreateVideoSessionResponse,
     MAX_VIDEO_BYTES,
     UploadInstruction,
+    ConfirmUploadRequest,
 )
 
 
@@ -51,3 +52,58 @@ def test_create_session_contract_accepts_supported_video() -> None:
 def test_create_session_contract_rejects_unsafe_input(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         CreateVideoSessionRequest(**payload)
+
+
+def test_create_video_session_normalizes_uppercase_checksum():
+    request = CreateVideoSessionRequest(
+        filename="squat.mp4",
+        content_type="video/mp4",
+        size_bytes=123,
+        checksum_sha256="A" * 64,
+    )
+    assert request.checksum_sha256 == "a" * 64
+
+def test_confirm_upload_normalizes_uppercase_checksum():
+    from gymbromatics.upload_contract import ConfirmUploadRequest
+
+    request = ConfirmUploadRequest(
+        size_bytes=123,
+        checksum_sha256="A" * 64,
+    )
+    assert request.checksum_sha256 == "a" * 64
+
+
+def test_create_video_session_rejects_invalid_checksum():
+    with pytest.raises(ValidationError):
+        CreateVideoSessionRequest(
+            filename="squat.mp4",
+            content_type="video/mp4",
+            size_bytes=123,
+            checksum_sha256="G" * 64,
+        )
+
+def test_create_video_session_accepts_missing_checksum():
+    request = CreateVideoSessionRequest(
+        filename="squat.mp4",
+        content_type="video/mp4",
+        size_bytes=123,
+    )
+    assert request.checksum_sha256 is None
+
+
+def test_confirm_upload_requires_checksum():
+    with pytest.raises(ValidationError):
+        ConfirmUploadRequest(
+            size_bytes=123,
+        )
+
+@pytest.mark.parametrize(
+    "checksum",
+    ["A" * 64, "a" * 64, "Ab12" * 16],
+)
+def test_confirm_upload_normalizes_checksum(checksum: str):
+    request = ConfirmUploadRequest(
+        size_bytes=123,
+        checksum_sha256=checksum,
+    )
+    assert request.checksum_sha256 == checksum.lower()
